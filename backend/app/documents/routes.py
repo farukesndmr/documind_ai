@@ -1,6 +1,7 @@
 import os
 from uuid import uuid4
 
+from app.documents.pdf_utils import extract_text_from_pdf
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
@@ -43,11 +44,13 @@ def upload_document(
     with open(file_path, "wb") as buffer:
         buffer.write(file.file.read())
 
+    extracted_text = extract_text_from_pdf(file_path)
     new_document = create_document(
         db=db,
         title=file.filename,
         file_path=file_path,
-        owner_id=current_user.id
+        owner_id=current_user.id,
+        extracted_text=extracted_text,
     )
 
     return new_document

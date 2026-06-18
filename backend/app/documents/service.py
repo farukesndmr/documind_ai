@@ -7,12 +7,14 @@ def create_document(
     db: Session,
     title: str,
     file_path: str,
-    owner_id: int
+    owner_id: int,
+    extracted_text: str | None = None
 ):
     new_document = Document(
         title=title,
         file_path=file_path,
-        owner_id=owner_id
+        owner_id=owner_id,
+        extracted_text=extracted_text
     )
 
     db.add(new_document)
