@@ -7,12 +7,17 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user
 from app.database.connection import get_db
 from app.documents.pdf_utils import extract_text_from_pdf
-from app.documents.schemas import DocumentChunkResponse, DocumentResponse
+from app.documents.schemas import (
+    ChunkSearchRequest,
+    DocumentChunkResponse,
+    DocumentResponse,
+)
 from app.documents.service import (
     create_document,
     create_document_chunks,
     get_chunks_by_document,
     get_documents_by_user,
+    search_similar_chunks,
 )
 from app.documents.text_utils import split_text_into_chunks
 
@@ -61,6 +66,7 @@ def upload_document(
     )
 
     chunks = split_text_into_chunks(extracted_text)
+
     create_document_chunks(
         db=db,
         document_id=new_document.id,
@@ -84,6 +90,25 @@ def list_documents(
     )
 
     return documents
+
+
+@router.post(
+    "/search",
+    response_model=list[DocumentChunkResponse]
+)
+def search_documents(
+    search_data: ChunkSearchRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    chunks = search_similar_chunks(
+        db=db,
+        query=search_data.query,
+        owner_id=current_user.id,
+        limit=search_data.limit
+    )
+
+    return chunks
 
 
 @router.get(

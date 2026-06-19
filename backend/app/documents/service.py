@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.documents.embedding_utils import generate_embedding
 from app.documents.models import Document, DocumentChunk
 
 
@@ -36,10 +37,13 @@ def create_document_chunks(
     chunk_objects = []
 
     for index, chunk_text in enumerate(chunks):
+        embedding = generate_embedding(chunk_text)
+
         chunk = DocumentChunk(
             document_id=document_id,
             content=chunk_text,
-            chunk_index=index
+            chunk_index=index,
+            embedding=embedding
         )
 
         db.add(chunk)
@@ -58,5 +62,24 @@ def get_chunks_by_document(db: Session, document_id: int):
         db.query(DocumentChunk)
         .filter(DocumentChunk.document_id == document_id)
         .order_by(DocumentChunk.chunk_index)
+        .all()
+    )
+
+
+def search_similar_chunks(
+    db: Session,
+    query: str,
+    owner_id: int,
+    limit: int = 5
+):
+    query_embedding = generate_embedding(query)
+
+    return (
+        db.query(DocumentChunk)
+        .join(Document, DocumentChunk.document_id == Document.id)
+        .filter(Document.owner_id == owner_id)
+        .filter(DocumentChunk.embedding.isnot(None))
+        .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
+        .limit(limit)
         .all()
     )

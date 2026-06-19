@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentResponse(BaseModel):
@@ -24,3 +24,8 @@ class DocumentChunkResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ChunkSearchRequest(BaseModel):
+    query: str
+    limit: int = Field(default=5, ge=1, le=10)
