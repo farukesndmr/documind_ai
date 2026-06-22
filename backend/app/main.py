@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.chat.routes import router as chat_router
 from app.auth.routes import router as auth_router
 from app.core.config import settings
 from app.database.connection import Base, engine
@@ -15,6 +16,7 @@ app = FastAPI(
     version=settings.API_VERSION
 )
 
+app.include_router(chat_router)
 app.include_router(auth_router)
 app.include_router(documents_router)
 
