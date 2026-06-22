@@ -1,24 +1,7 @@
 from sqlalchemy.orm import Session
 
+from app.chat.llm_service import generate_answer_with_llm
 from app.documents.service import search_similar_chunks
-
-
-def build_basic_answer(question: str, chunks) -> str:
-    if not chunks:
-        return "Bu soruyla ilgili dokümanlarda uygun bir bilgi bulunamadı."
-
-    context_preview = "\n\n".join(
-        chunk.content for chunk in chunks[:3]
-    )
-
-    answer = (
-        "Bu soruya göre dokümanlarda bulunan en alakalı bilgiler aşağıdadır. "
-        "Şu an cevap, bulunan kaynak parçalardan oluşturulmuş basit bir özet formatındadır.\n\n"
-        f"Soru: {question}\n\n"
-        f"İlgili içerik:\n{context_preview}"
-    )
-
-    return answer
 
 
 def ask_question(
@@ -34,7 +17,7 @@ def ask_question(
         limit=limit
     )
 
-    answer = build_basic_answer(
+    answer = generate_answer_with_llm(
         question=question,
         chunks=chunks
     )
