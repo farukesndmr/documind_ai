@@ -1,75 +1,153 @@
-import ollama
+import json
+import os
+import re
+import urllib.error
+import urllib.request
+from typing import Sequence
 
-from app.core.config import settings
+
+def _get_ollama_base_url() -> str:
+    return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
-def build_context_from_chunks(chunks) -> str:
+def _get_configured_model() -> str | None:
+    return os.getenv("OLLAMA_MODEL")
+
+
+def _post_json(url: str, payload: dict, timeout: int = 120) -> dict:
+    data = json.dumps(payload).encode("utf-8")
+
+    request = urllib.request.Request(
+        url=url,
+        data=data,
+        headers={
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        response_body = response.read().decode("utf-8")
+        return json.loads(response_body)
+
+
+def _get_json(url: str, timeout: int = 10) -> dict:
+    request = urllib.request.Request(
+        url=url,
+        method="GET"
+    )
+
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        response_body = response.read().decode("utf-8")
+        return json.loads(response_body)
+
+
+def _get_available_ollama_model() -> str:
+    configured_model = _get_configured_model()
+
+    if configured_model:
+        return configured_model
+
+    base_url = _get_ollama_base_url()
+
+    try:
+        data = _get_json(f"{base_url}/api/tags")
+        models = data.get("models", [])
+
+        if models:
+            return models[0]["name"]
+    except Exception:
+        pass
+
+    return "llama3.2"
+
+
+def _clean_answer(answer: str) -> str:
+    cleaned = answer.strip()
+
+    cleaned = re.sub(r"^cevap\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^answer\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+
+    # Japonca / Çince karakter karışmasını temizler.
+    cleaned = re.sub(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+", "", cleaned)
+
+    cleaned = cleaned.strip()
+
+    if not cleaned:
+        return "Bu bilgi dokümanda açıkça bulunmuyor."
+
+    return cleaned
+
+
+def _build_context(chunks: Sequence) -> str:
     context_parts = []
 
     for index, chunk in enumerate(chunks, start=1):
+        chunk_id = getattr(chunk, "id", "unknown")
+        document_id = getattr(chunk, "document_id", "unknown")
+        chunk_index = getattr(chunk, "chunk_index", "unknown")
+        content = getattr(chunk, "content", "")
+
         context_parts.append(
-            f"[Source {index} | document_id={chunk.document_id} | "
-            f"chunk_index={chunk.chunk_index}]\n{chunk.content}"
+            f"[Kaynak {index} | document_id={document_id} | chunk_id={chunk_id} | chunk_index={chunk_index}]\n"
+            f"{content}"
         )
 
-    return "\n\n".join(context_parts)
+    return "\n\n---\n\n".join(context_parts)
 
 
-def build_fallback_answer(question: str, chunks) -> str:
-    if not chunks:
-        return "Bu soruyla ilgili dokümanlarda uygun bir bilgi bulunamadı."
-
-    context_preview = "\n\n".join(
-        chunk.content for chunk in chunks[:3]
-    )
-
-    return (
-        "Local AI modeli çalıştırılamadı. "
-        "Aşağıda soruyla en alakalı bulunan kaynak parçalar gösteriliyor.\n\n"
-        f"Soru: {question}\n\n"
-        f"İlgili içerik:\n{context_preview}"
-    )
-
-
-def generate_answer_with_llm(question: str, chunks) -> str:
-    if not chunks:
-        return "Bu soruyla ilgili dokümanlarda uygun bir bilgi bulunamadı."
-
-    context = build_context_from_chunks(chunks)
+def generate_answer_with_llm(question: str, chunks: Sequence) -> str:
+    context = _build_context(chunks)
 
     prompt = f"""
-Kullanıcının sorusunu sadece verilen kaynak metinlere dayanarak cevapla.
+Sen DocuMind AI adlı bir PDF analiz asistanısın.
 
-Kurallar:
-- Kaynaklarda yoksa "Bu bilgi dokümanda bulunamadı." de.
-- Cevabı kısa, net ve anlaşılır yaz.
-- Gereksiz tahmin yapma.
-- Cevabın sonunda kullandığın source numaralarını belirt.
+Aşağıdaki kurallara kesinlikle uy:
 
-Kullanıcı sorusu:
+1. Cevabı sadece verilen PDF parçalarına göre ver.
+2. PDF parçalarında açıkça bulunmayan bilgileri uydurma.
+3. Cevabı her zaman Türkçe ver.
+4. İngilizce, Japonca veya başka bir dil karıştırma.
+5. Gereksiz genel açıklama yapma.
+6. Kısa, net ve belgeye dayalı cevap ver.
+7. Eğer cevap PDF parçalarında yoksa sadece şunu söyle:
+"Bu bilgi dokümanda açıkça bulunmuyor."
+
+PDF PARÇALARI:
+{context}
+
+KULLANICININ SORUSU:
 {question}
 
-Kaynak metinler:
-{context}
-"""
+TÜRKÇE CEVAP:
+""".strip()
+
+    base_url = _get_ollama_base_url()
+    model = _get_available_ollama_model()
+
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "num_predict": 300
+        }
+    }
 
     try:
-        response = ollama.chat(
-            model=settings.OLLAMA_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Sen kaynaklara bağlı cevap veren bir doküman analiz asistanısın."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
+        data = _post_json(
+            url=f"{base_url}/api/generate",
+            payload=payload
         )
 
-        return response["message"]["content"]
+        answer = data.get("response", "")
+
+        return _clean_answer(answer)
+
+    except urllib.error.URLError:
+        return "Ollama çalışmıyor olabilir. Lütfen Ollama uygulamasının açık olduğundan emin ol."
 
     except Exception as error:
-        print(f"Ollama error: {error}")
-        return build_fallback_answer(question, chunks)
+        return f"Model cevabı oluşturulurken hata oluştu: {str(error)}"

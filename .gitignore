@@ -7,3 +7,9 @@ dist/
 build/
 .DS_Store
 backend/uploads/
+backend/.env
+frontend/.env
+uploads/
+*.db
+*.sqlite
+*.log
