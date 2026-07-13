@@ -23,7 +23,10 @@ export type ChatAnswer = {
 };
 
 export function getToken(): string | null {
-  return localStorage.getItem("access_token") || localStorage.getItem("token");
+  return (
+    localStorage.getItem("access_token") ||
+    localStorage.getItem("token")
+  );
 }
 
 export function setToken(token: string): void {
@@ -47,7 +50,9 @@ function getAuthHeaders(): Record<string, string> {
   };
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readErrorMessage(
+  response: Response,
+): Promise<string> {
   try {
     const data = await response.json();
 
@@ -56,7 +61,29 @@ async function readErrorMessage(response: Response): Promise<string> {
     }
 
     if (Array.isArray(data.detail)) {
-      return data.detail.map((item) => item.msg || JSON.stringify(item)).join(", ");
+      return data.detail
+        .map((item: unknown) => {
+          if (
+            typeof item === "object" &&
+            item !== null &&
+            "msg" in item
+          ) {
+            const message = (
+              item as { msg?: unknown }
+            ).msg;
+
+            if (typeof message === "string") {
+              return message;
+            }
+          }
+
+          if (typeof item === "string") {
+            return item;
+          }
+
+          return JSON.stringify(item) ?? String(item);
+        })
+        .join(", ");
     }
 
     return JSON.stringify(data);
@@ -67,14 +94,20 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 async function fetchFirstAvailable(
   paths: string[],
-  initFactory: () => RequestInit
+  initFactory: () => RequestInit,
 ): Promise<Response> {
   let lastResponse: Response | null = null;
 
   for (const path of paths) {
-    const response = await fetch(`${API_BASE_URL}${path}`, initFactory());
+    const response = await fetch(
+      `${API_BASE_URL}${path}`,
+      initFactory(),
+    );
 
-    if (response.status !== 404 && response.status !== 405) {
+    if (
+      response.status !== 404 &&
+      response.status !== 405
+    ) {
       return response;
     }
 
@@ -82,7 +115,9 @@ async function fetchFirstAvailable(
   }
 
   if (lastResponse) {
-    throw new Error(`Endpoint not found. Last status: ${lastResponse.status}`);
+    throw new Error(
+      `Endpoint not found. Last status: ${lastResponse.status}`,
+    );
   }
 
   throw new Error("Endpoint not found.");
@@ -90,18 +125,26 @@ async function fetchFirstAvailable(
 
 function normalizeDocument(document: any): DocumentItem {
   return {
-    id: Number(document.id ?? document.document_id),
+    id: Number(
+      document.id ??
+        document.document_id,
+    ),
     filename:
       document.filename ??
       document.file_name ??
       document.name ??
       document.title ??
-      `Document ${document.id ?? document.document_id}`,
+      `Document ${
+        document.id ??
+        document.document_id
+      }`,
     created_at: document.created_at,
   };
 }
 
-function normalizeDocumentsResponse(data: any): DocumentItem[] {
+function normalizeDocumentsResponse(
+  data: any,
+): DocumentItem[] {
   if (Array.isArray(data)) {
     return data.map(normalizeDocument);
   }
@@ -117,7 +160,9 @@ function normalizeDocumentsResponse(data: any): DocumentItem[] {
   return [];
 }
 
-function normalizeChatResponse(data: any): ChatAnswer {
+function normalizeChatResponse(
+  data: any,
+): ChatAnswer {
   const answer =
     data.answer ??
     data.response ??
@@ -128,23 +173,37 @@ function normalizeChatResponse(data: any): ChatAnswer {
 
   return {
     answer,
-    sources: data.sources ?? data.chunks ?? data.context ?? [],
+    sources:
+      data.sources ??
+      data.chunks ??
+      data.context ??
+      [],
     raw: data,
   };
 }
 
-async function parseAuthResponse(response: Response): Promise<string> {
+async function parseAuthResponse(
+  response: Response,
+): Promise<string> {
   const data = await response.json();
-  const token = data.access_token ?? data.token;
+
+  const token =
+    data.access_token ??
+    data.token;
 
   if (!token) {
-    throw new Error("Login response did not include access_token.");
+    throw new Error(
+      "Login response did not include access_token.",
+    );
   }
 
   return token;
 }
 
-export async function registerUser(email: string, password: string): Promise<void> {
+export async function registerUser(
+  email: string,
+  password: string,
+): Promise<void> {
   const response = await fetchFirstAvailable(
     [ENDPOINTS.register, "/register"],
     () => ({
@@ -157,104 +216,149 @@ export async function registerUser(email: string, password: string): Promise<voi
         username: email,
         password,
       }),
-    })
+    }),
   );
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    throw new Error(
+      await readErrorMessage(response),
+    );
   }
 }
 
-export async function loginUser(email: string, password: string): Promise<string> {
+export async function loginUser(
+  email: string,
+  password: string,
+): Promise<string> {
   try {
-    const jsonResponse = await fetchFirstAvailable(
-      [ENDPOINTS.login, "/login"],
-      () => ({
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email,
-          username: email,
-          password,
+    const jsonResponse =
+      await fetchFirstAvailable(
+        [ENDPOINTS.login, "/login"],
+        () => ({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            username: email,
+            password,
+          }),
         }),
-      })
-    );
+      );
 
     if (jsonResponse.ok) {
       return parseAuthResponse(jsonResponse);
     }
   } catch {
-    // If JSON login endpoint does not exist, try form login below.
+    // JSON login çalışmazsa form login denenir.
   }
 
   const formData = new URLSearchParams();
   formData.append("username", email);
   formData.append("password", password);
 
-  const formResponse = await fetchFirstAvailable(
-    [ENDPOINTS.login, "/login"],
-    () => ({
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData,
-    })
-  );
+  const formResponse =
+    await fetchFirstAvailable(
+      [ENDPOINTS.login, "/login"],
+      () => ({
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      }),
+    );
 
   if (!formResponse.ok) {
-    throw new Error(await readErrorMessage(formResponse));
+    throw new Error(
+      await readErrorMessage(formResponse),
+    );
   }
 
   return parseAuthResponse(formResponse);
 }
 
-export async function getDocuments(): Promise<DocumentItem[]> {
+export async function getDocuments(): Promise<
+  DocumentItem[]
+> {
   const response = await fetchFirstAvailable(
-    [ENDPOINTS.documents, ENDPOINTS.documentsWithSlash],
+    [
+      ENDPOINTS.documents,
+      ENDPOINTS.documentsWithSlash,
+    ],
     () => ({
       method: "GET",
       headers: {
         ...getAuthHeaders(),
       },
-    })
+    }),
   );
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    throw new Error(
+      await readErrorMessage(response),
+    );
   }
 
   const data = await response.json();
   return normalizeDocumentsResponse(data);
 }
 
-export async function uploadDocument(file: File): Promise<unknown> {
+export async function uploadDocument(
+  file: File,
+): Promise<unknown> {
   const formData = new FormData();
   formData.append("file", file);
 
   const response = await fetchFirstAvailable(
-    [ENDPOINTS.upload, ENDPOINTS.documentsWithSlash, ENDPOINTS.documents],
+    [
+      ENDPOINTS.upload,
+      ENDPOINTS.documentsWithSlash,
+      ENDPOINTS.documents,
+    ],
     () => ({
       method: "POST",
       headers: {
         ...getAuthHeaders(),
       },
       body: formData,
-    })
+    }),
   );
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    throw new Error(
+      await readErrorMessage(response),
+    );
   }
 
   return response.json();
 }
 
+export async function deleteDocument(
+  documentId: number,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.documents}/${documentId}`,
+    {
+      method: "DELETE",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+}
+
 export async function askQuestion(
   documentId: number,
-  question: string
+  question: string,
 ): Promise<ChatAnswer> {
   const response = await fetchFirstAvailable(
     [ENDPOINTS.chat, ENDPOINTS.chatAsk],
@@ -269,11 +373,13 @@ export async function askQuestion(
         question,
         message: question,
       }),
-    })
+    }),
   );
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    throw new Error(
+      await readErrorMessage(response),
+    );
   }
 
   const data = await response.json();

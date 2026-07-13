@@ -1,11 +1,37 @@
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  color: #ffffff;
-  background: #020617;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  color: #f5f5f8;
+  background: #0a0a0f;
+
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  --background: #0a0a0f;
+  --surface: #111118;
+  --surface-raised: #171720;
+
+  --border: rgba(239, 238, 255, 0.085);
+  --border-strong: rgba(239, 238, 255, 0.14);
+
+  --text-primary: #f5f5f8;
+  --text-secondary: #c9c8d2;
+  --text-muted: #898793;
+  --text-dim: #61606b;
+
+  --accent: #765cff;
+  --accent-light: #a99cff;
+  --success: #1fd2b4;
+  --danger: #ff788a;
 }
 
 * {
@@ -13,18 +39,76 @@
 }
 
 html {
-  background: #020617;
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--background);
 }
 
 body {
-  margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #020617;
+  margin: 0;
+  color: var(--text-primary);
+  background:
+    radial-gradient(
+      circle at 80% -10%,
+      rgba(123, 97, 255, 0.07),
+      transparent 30%
+    ),
+    var(--background);
+}
+
+body,
+button,
+input,
+textarea {
+  font: inherit;
 }
 
 button,
 input,
 textarea {
-  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  appearance: none;
+}
+
+::selection {
+  color: white;
+  background: var(--accent);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      rgba(255, 255, 255, 0.14),
+      rgba(255, 255, 255, 0.14)
+    )
+    content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(
+      rgba(169, 156, 255, 0.28),
+      rgba(169, 156, 255, 0.28)
+    )
+    content-box;
+}
+
+#root {
+  min-height: 100vh;
 }

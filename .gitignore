@@ -12,4 +12,6 @@ frontend/.env
 uploads/
 *.db
 *.sqlite
-*.log
+*.logbackend/data/openai_usage.json
+
+backend/data/
