@@ -22,11 +22,18 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # OpenAI core
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
 
+    # OpenAI usage limits
     OPENAI_HARD_LIMIT_USD: float = 1.70
 
+    # OpenAI cost estimation
+    OPENAI_INPUT_PRICE_PER_1M: float = 0.15
+    OPENAI_OUTPUT_PRICE_PER_1M: float = 0.60
+
+    # OpenAI generation settings
     OPENAI_MAX_OUTPUT_TOKENS: int = 2600
     OPENAI_QA_MAX_OUTPUT_TOKENS: int = 2600
     OPENAI_SUMMARY_MAX_OUTPUT_TOKENS: int = 2600
@@ -35,6 +42,7 @@ class Settings(BaseSettings):
     OPENAI_QA_TEMPERATURE: float = 0.2
     OPENAI_SUMMARY_TEMPERATURE: float = 0.2
 
+    # Frontend / CORS
     FRONTEND_URL: str = "http://127.0.0.1:5173"
 
     BACKEND_CORS_ORIGINS: str = (
@@ -57,6 +65,7 @@ class Settings(BaseSettings):
 
         return origins
 
+    # Backward compatibility for older auth code
     @property
     def JWT_SECRET_KEY(self) -> str:
         return self.SECRET_KEY
