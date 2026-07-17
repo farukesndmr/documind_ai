@@ -24,9 +24,16 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
+
     OPENAI_HARD_LIMIT_USD: float = 1.70
+
     OPENAI_MAX_OUTPUT_TOKENS: int = 2600
+    OPENAI_QA_MAX_OUTPUT_TOKENS: int = 2600
+    OPENAI_SUMMARY_MAX_OUTPUT_TOKENS: int = 2600
+
     OPENAI_TEMPERATURE: float = 0.2
+    OPENAI_QA_TEMPERATURE: float = 0.2
+    OPENAI_SUMMARY_TEMPERATURE: float = 0.2
 
     FRONTEND_URL: str = "http://127.0.0.1:5173"
 
