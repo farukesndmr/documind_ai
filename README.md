@@ -7,7 +7,15 @@ Live Demo: https://documind-ai-g0wj.onrender.com/
 Backend API: https://documind-api-5w97.onrender.com/
 
 ---
+## Screenshots
 
+### Sign in
+
+![DocuMind AI sign in screen](docs/screenshots/signin.png)
+
+### Workspace
+
+![DocuMind AI workspace screen](docs/screenshots/workspace.png)
 ## Features
 
 - Google sign-in authentication
