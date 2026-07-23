@@ -63,16 +63,20 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
     verification_url = build_email_verification_url(verification_token)
 
-    email_sent = send_verification_email(
+    try:
+        email_sent = send_verification_email(
         to_email=new_user.email,
         verification_url=verification_url,
     )
 
-    if not email_sent:
-        print(
+        if not email_sent:
+            print(
             "Verification email could not be sent. "
-            "SMTP is probably not configured yet."
+            "Email provider is probably not configured yet."
         )
+
+    except Exception as exc:
+        print(f"Verification email could not be sent: {exc}")
 
     return new_user
 
