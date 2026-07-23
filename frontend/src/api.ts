@@ -12,6 +12,7 @@ const ENDPOINTS = {
   chatAsk: "/chat/ask",
   adminUsers: "/admin/users",
   adminPendingUsers: "/admin/users/pending",
+  googleLogin: "/auth/google-login",
 };
 
 export type UserProfile = {
@@ -320,7 +321,30 @@ export async function loginUser(
 
   return parseAuthResponse(formResponse);
 }
+export async function loginWithGoogle(
+  credential: string,
+): Promise<string> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.googleLogin}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        credential,
+      }),
+    },
+  );
 
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  return parseAuthResponse(response);
+}
 export async function getMe(): Promise<UserProfile> {
   const response = await fetch(
     `${API_BASE_URL}${ENDPOINTS.me}`,

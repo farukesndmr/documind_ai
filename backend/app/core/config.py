@@ -102,6 +102,7 @@ class Settings(BaseSettings):
 
     # Frontend / CORS
     FRONTEND_URL: str = "http://127.0.0.1:5173"
+    GOOGLE_CLIENT_ID: str 
 
     BACKEND_CORS_ORIGINS: str = (
         "http://127.0.0.1:5173,"

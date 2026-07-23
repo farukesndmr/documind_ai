@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -120,3 +121,43 @@ def authenticate_user(db: Session, email: str, password: str):
         return None
 
     return user
+def get_or_create_google_user(db: Session, email: str):
+    normalized_email = email.lower().strip()
+
+    user = get_user_by_email(db, normalized_email)
+
+    if user:
+        if not user.email_verified:
+            user.email_verified = True
+            user.email_verified_at = datetime.now(timezone.utc)
+            user.email_verification_token_hash = None
+            user.email_verification_expires_at = None
+            db.commit()
+            db.refresh(user)
+
+        return user
+
+    random_password = secrets.token_urlsafe(32)
+
+    new_user = User(
+        email=normalized_email,
+        hashed_password=hash_password(random_password),
+        role="user",
+        email_verified=True,
+        email_verified_at=datetime.now(timezone.utc),
+        email_verification_token_hash=None,
+        email_verification_expires_at=None,
+        last_verification_email_sent_at=None,
+        is_approved=True,
+        approval_status="approved",
+        approved_at=datetime.now(timezone.utc),
+        approved_by=None,
+        pdf_upload_count=0,
+        question_count=0,
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return new_user

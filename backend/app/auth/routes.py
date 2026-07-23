@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-
+from app.auth.google import verify_google_credential
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from app.auth.email_verification import (
     get_email_verification_expires_at,
     hash_email_verification_token,
 )
-from app.auth.schemas import TokenResponse, VerifyEmailResponse
+from app.auth.schemas import GoogleLoginRequest, TokenResponse, VerifyEmailResponse
 from app.auth.security import create_access_token
 from app.core.email import send_verification_email
 from app.database.connection import get_db
@@ -19,6 +19,7 @@ from app.users.schemas import UserCreate, UserResponse
 from app.users.service import (
     authenticate_user,
     create_user,
+    get_or_create_google_user,
     get_user_by_email,
     get_user_by_email_verification_token_hash,
     mark_user_email_verified,
@@ -167,3 +168,35 @@ def login(
 )
 def get_me(current_user=Depends(get_current_user)):
     return current_user
+
+@router.post(
+    "/google-login",
+    response_model=TokenResponse,
+)
+def google_login(
+    request_data: GoogleLoginRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        google_user_info = verify_google_credential(
+            request_data.credential
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    user = get_or_create_google_user(
+        db=db,
+        email=google_user_info["email"],
+    )
+
+    access_token = create_access_token(
+        data={"sub": user.email}
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }

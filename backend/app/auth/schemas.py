@@ -15,3 +15,6 @@ class VerifyEmailResponse(BaseModel):
     message: str
     email_verified: bool
     approval_status: str | None = None
+
+class GoogleLoginRequest(BaseModel):
+    credential: str

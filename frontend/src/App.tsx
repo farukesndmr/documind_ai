@@ -12,16 +12,20 @@ import "./App.css";
 import "./delete.css";
 
 import {
+  GoogleLogin,
+  GoogleOAuthProvider,
+} from "@react-oauth/google";
+
+import {
   approveUser,
   askQuestion,
-  clearToken,
+  
   deleteDocument,
   getDocuments,
   getMe,
   getPendingUsers,
   getToken,
-  loginUser,
-  registerUser,
+  loginWithGoogle,
   rejectUser,
   setToken,
   uploadDocument,
@@ -30,6 +34,7 @@ import {
   type DocumentItem,
   type UserProfile,
 } from "./api";
+
 
 type IconName =
   | "logo"
@@ -264,21 +269,12 @@ function formatDate(value?: string) {
     year: "numeric",
   }).format(date);
 }
-
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(
     Boolean(getToken()),
   );
-
-  const [authMode, setAuthMode] = useState<"login" | "register">(
-    "login",
-  );
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
-  const [authSuccess, setAuthSuccess] = useState("");
 
   const [currentUser, setCurrentUser] =
     useState<UserProfile | null>(null);
@@ -478,71 +474,42 @@ function App() {
     })();
   }, [verificationToken]);
 
-  async function handleAuthSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-
-    const cleanEmail = email.trim();
-
-    if (!cleanEmail || !password.trim()) {
-      setAuthError("Email and password are required.");
-      return;
-    }
-
-    try {
-      setAuthLoading(true);
-      setAuthError("");
-      setAuthSuccess("");
-
-      if (authMode === "register") {
-        await registerUser(cleanEmail, password);
-
-        setAuthMode("login");
-        setPassword("");
-        setAuthSuccess(
-          "Account created. Please verify your email to start using DocuMind.",
-        );
-
-        return;
-      }
-
-      const token = await loginUser(cleanEmail, password);
-
-      setToken(token);
-      setIsAuthenticated(true);
-      setPassword("");
-    } catch (error) {
-      setAuthError(
-        error instanceof Error
-          ? error.message
-          : "Authentication failed.",
-      );
-    } finally {
-      setAuthLoading(false);
-    }
+  async function handleGoogleLoginSuccess(credential?: string) {
+  if (!credential) {
+    setAuthError("Google login did not return a credential.");
+    return;
   }
 
-  function handleLogout() {
-    clearToken();
+  try {
+    setAuthError("");
 
-    setIsAuthenticated(false);
-    setCurrentUser(null);
-    setProfileError("");
-    setProfileLoading(false);
-    setPendingUsers([]);
-    setPendingUsersError("");
-    setAdminActionLoadingId(null);
-    setDocuments([]);
-    setSelectedDocumentId(null);
-    setChatAnswer(null);
-    setQuestion("");
-    setChatError("");
-    setDocumentsError("");
-    setUploadMessage("");
-    setUploadError("");
-    setDeletingDocumentId(null);
+    const token = await loginWithGoogle(credential);
+
+    setToken(token);
+    setIsAuthenticated(true);
+  } catch (error) {
+    setAuthError(
+      error instanceof Error
+        ? error.message
+        : "Google login failed.",
+    );
   }
+}
+function handleLogout() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("token");
+
+  setIsAuthenticated(false);
+  setDocuments([]);
+  setSelectedDocumentId(null);
+  setChatAnswer(null);
+  setQuestion("");
+  setChatError("");
+  setDocumentsError("");
+  setUploadMessage("");
+  setUploadError("");
+  setDeletingDocumentId(null);
+}
 
   async function handleFileUpload(
     event: ChangeEvent<HTMLInputElement>,
@@ -876,116 +843,38 @@ function App() {
 
             <div className="auth-card-heading">
               <span>
-                {authMode === "login"
-                  ? "Welcome back"
-                  : "Create your account"}
+                Continue with Google
               </span>
 
               <h2>
-                {authMode === "login"
-                  ? "Enter your workspace"
-                  : "Start using DocuMind"}
+                Enter your workspace
               </h2>
 
               <p>
-                {authMode === "login"
-                  ? "Sign in to continue working with your documents."
-                  : "Create an account to upload and explore your PDFs."}
+                Sign in or create an account with your Google account.
               </p>
             </div>
-
-            <div className="auth-switch">
-              <button
-                type="button"
-                className={authMode === "login" ? "active" : ""}
-                onClick={() => {
-                  setAuthMode("login");
-                  setAuthError("");
-                  setAuthSuccess("");
-                }}
-              >
-                Sign in
-              </button>
-
-              <button
-                type="button"
-                className={authMode === "register" ? "active" : ""}
-                onClick={() => {
-                  setAuthMode("register");
-                  setAuthError("");
-                  setAuthSuccess("");
-                }}
-              >
-                Register
-              </button>
-            </div>
-
-            <form
-              className="auth-form"
-              onSubmit={handleAuthSubmit}
-            >
-              <label>
-                <span>Email address</span>
-
-                <input
-                  type="email"
-                  value={email}
-                  placeholder="name@example.com"
-                  autoComplete="email"
-                  onChange={(event) =>
-                    setEmail(event.target.value)
-                  }
-                />
-              </label>
-
-              <label>
-                <span>Password</span>
-
-                <input
-                  type="password"
-                  value={password}
-                  placeholder="Enter your password"
-                  autoComplete={
-                    authMode === "login"
-                      ? "current-password"
-                      : "new-password"
-                  }
-                  onChange={(event) =>
-                    setPassword(event.target.value)
-                  }
-                />
-              </label>
-
+            <div className="google-login-box">
+              <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+                <GoogleLogin
+                  text="continue_with"
+                  shape="pill"
+                  size="large"
+                  width="320"
+                  onSuccess={(credentialResponse) => {
+                    void handleGoogleLoginSuccess(
+                      credentialResponse.credential,
+                      );
+                    }}
+                    onError={() => {
+                      setAuthError("Google login failed.");
+                    }}
+                  />
+                </GoogleOAuthProvider>
+              </div>
               {authError && (
                 <p className="error-message">{authError}</p>
               )}
-
-              {authSuccess && (
-                <p className="success-message">
-                  <Icon name="check" size={14} />
-                  {authSuccess}
-                </p>
-              )}
-
-              <button
-                className="auth-submit"
-                type="submit"
-                disabled={authLoading}
-              >
-                <span>
-                  {authLoading
-                    ? "Please wait..."
-                    : authMode === "login"
-                      ? "Enter workspace"
-                      : "Create account"}
-                </span>
-
-                {!authLoading && (
-                  <Icon name="arrow" size={17} />
-                )}
-              </button>
-            </form>
-
             <div className="security-note">
               <Icon name="shield" size={15} />
               Secure authentication and private storage
