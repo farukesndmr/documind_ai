@@ -17,19 +17,14 @@ import {
 } from "@react-oauth/google";
 
 import {
-  approveUser,
   askQuestion,
-  
   deleteDocument,
   getDocuments,
   getMe,
-  getPendingUsers,
   getToken,
   loginWithGoogle,
-  rejectUser,
   setToken,
   uploadDocument,
-  verifyEmail,
   type ChatAnswer,
   type DocumentItem,
   type UserProfile,
@@ -281,22 +276,6 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
 
-  const [verificationLoading, setVerificationLoading] =
-    useState(false);
-  const [verificationMessage, setVerificationMessage] =
-    useState("");
-  const [verificationError, setVerificationError] =
-    useState("");
-
-  const [pendingUsers, setPendingUsers] = useState<UserProfile[]>(
-    [],
-  );
-  const [pendingUsersLoading, setPendingUsersLoading] =
-    useState(false);
-  const [pendingUsersError, setPendingUsersError] = useState("");
-  const [adminActionLoadingId, setAdminActionLoadingId] =
-    useState<number | null>(null);
-
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<
     number | null
@@ -318,11 +297,6 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
 
-  const verificationToken = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("token");
-  }, []);
-
   const selectedDocument = useMemo(() => {
     return documents.find(
       (document) => document.id === selectedDocumentId,
@@ -333,7 +307,10 @@ function App() {
 
   const canUseWorkspace = Boolean(
     currentUser &&
-      (isAdmin || currentUser.can_use_app || currentUser.is_active),
+      (isAdmin ||
+        currentUser.email_verified ||
+        currentUser.can_use_app ||
+        currentUser.is_active),
   );
 
   const pdfUsageText = currentUser
@@ -363,24 +340,6 @@ function App() {
       throw error;
     } finally {
       setProfileLoading(false);
-    }
-  }, []);
-
-  const loadPendingUsers = useCallback(async () => {
-    try {
-      setPendingUsersLoading(true);
-      setPendingUsersError("");
-
-      const data = await getPendingUsers();
-      setPendingUsers(data);
-    } catch (error) {
-      setPendingUsersError(
-        error instanceof Error
-          ? error.message
-          : "Pending users could not be loaded.",
-      );
-    } finally {
-      setPendingUsersLoading(false);
     }
   }, []);
 
@@ -434,9 +393,6 @@ function App() {
           setSelectedDocumentId(null);
         }
 
-        if (profile.role === "admin") {
-          await loadPendingUsers();
-        }
       } catch {
         // Error message is already stored in state.
       }
@@ -445,71 +401,46 @@ function App() {
     isAuthenticated,
     loadCurrentUser,
     loadDocuments,
-    loadPendingUsers,
   ]);
 
-  useEffect(() => {
-    if (!verificationToken) {
+  async function handleGoogleLoginSuccess(credential?: string) {
+    if (!credential) {
+      setAuthError("Google login did not return a credential.");
       return;
     }
 
-    void (async () => {
-      try {
-        setVerificationLoading(true);
-        setVerificationError("");
-        setVerificationMessage("");
+    try {
+      setAuthError("");
 
-        const result = await verifyEmail(verificationToken);
+      const token = await loginWithGoogle(credential);
 
-        setVerificationMessage(result.message);
-      } catch (error) {
-        setVerificationError(
-          error instanceof Error
-            ? error.message
-            : "Email verification failed.",
-        );
-      } finally {
-        setVerificationLoading(false);
-      }
-    })();
-  }, [verificationToken]);
-
-  async function handleGoogleLoginSuccess(credential?: string) {
-  if (!credential) {
-    setAuthError("Google login did not return a credential.");
-    return;
+      setToken(token);
+      setIsAuthenticated(true);
+    } catch (error) {
+      setAuthError(
+        error instanceof Error ? error.message : "Google login failed.",
+      );
+    }
   }
 
-  try {
-    setAuthError("");
 
-    const token = await loginWithGoogle(credential);
+  function handleLogout() {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("token");
 
-    setToken(token);
-    setIsAuthenticated(true);
-  } catch (error) {
-    setAuthError(
-      error instanceof Error
-        ? error.message
-        : "Google login failed.",
-    );
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setProfileError("");
+    setDocuments([]);
+    setSelectedDocumentId(null);
+    setChatAnswer(null);
+    setQuestion("");
+    setChatError("");
+    setDocumentsError("");
+    setUploadMessage("");
+    setUploadError("");
+    setDeletingDocumentId(null);
   }
-}
-function handleLogout() {
-  localStorage.removeItem("access_token");
-  localStorage.removeItem("token");
-
-  setIsAuthenticated(false);
-  setDocuments([]);
-  setSelectedDocumentId(null);
-  setChatAnswer(null);
-  setQuestion("");
-  setChatError("");
-  setDocumentsError("");
-  setUploadMessage("");
-  setUploadError("");
-  setDeletingDocumentId(null);
-}
 
   async function handleFileUpload(
     event: ChangeEvent<HTMLInputElement>,
@@ -647,100 +578,6 @@ function handleLogout() {
     }
   }
 
-  async function handleRefreshAccountStatus() {
-    try {
-      const profile = await loadCurrentUser();
-
-      if (
-        profile.role === "admin" ||
-        profile.can_use_app ||
-        profile.is_active
-      ) {
-        await loadDocuments();
-      }
-
-      if (profile.role === "admin") {
-        await loadPendingUsers();
-      }
-    } catch {
-      // Error message is already stored in state.
-    }
-  }
-
-  async function handleAdminUserAction(
-    userId: number,
-    action: "approve" | "reject",
-  ) {
-    try {
-      setAdminActionLoadingId(userId);
-      setPendingUsersError("");
-
-      if (action === "approve") {
-        await approveUser(userId);
-      } else {
-        await rejectUser(userId);
-      }
-
-      await loadPendingUsers();
-    } catch (error) {
-      setPendingUsersError(
-        error instanceof Error
-          ? error.message
-          : "Admin action failed.",
-      );
-    } finally {
-      setAdminActionLoadingId(null);
-    }
-  }
-
-  if (verificationToken && !isAuthenticated) {
-    return (
-      <main className="auth-layout">
-        <section className="auth-form-side">
-          <div className="auth-card">
-            <div className="auth-card-heading">
-              <span>Email verification</span>
-
-              <h2>Verify your DocuMind account</h2>
-
-              <p>
-                After verification, you can start using DocuMind with the demo limits.
-              </p>
-            </div>
-
-            {verificationLoading && (
-              <p className="sidebar-message">
-                Verifying your email...
-              </p>
-            )}
-
-            {verificationMessage && (
-              <p className="success-message">
-                <Icon name="check" size={14} />
-                {verificationMessage}
-              </p>
-            )}
-
-            {verificationError && (
-              <p className="error-message">{verificationError}</p>
-            )}
-
-            <button
-              className="auth-submit"
-              type="button"
-              onClick={() => {
-                window.location.href = "/";
-              }}
-            >
-              <span>Go to sign in</span>
-              <Icon name="arrow" size={17} />
-            </button>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
   if (!isAuthenticated) {
     return (
       <main className="auth-layout">
@@ -759,17 +596,17 @@ function handleLogout() {
           <div className="showcase-content">
             <div className="showcase-badge">
               <Icon name="sparkles" size={15} />
-              AI-powered document intelligence
+              Production RAG document assistant
             </div>
 
             <h1>
-              Turn documents into
-              <span> useful knowledge.</span>
+              Ask better questions from
+              <span> your PDFs.</span>
             </h1>
 
             <p>
-              Ask questions, create exam summaries and extract
-              important concepts directly from your PDFs.
+              Upload a PDF, retrieve relevant passages and get
+              source-grounded answers with an AI workflow.
             </p>
 
             <div className="showcase-features">
@@ -826,7 +663,7 @@ function handleLogout() {
           </div>
 
           <footer className="showcase-footer">
-            <span>Built for focused learning.</span>
+            <span>Built as a full-stack AI portfolio project.</span>
             <span>DocuMind AI</span>
           </footer>
         </section>
@@ -855,15 +692,16 @@ function handleLogout() {
               </p>
             </div>
             <div className="google-login-box">
-              <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-                <GoogleLogin
-                  text="continue_with"
-                  shape="pill"
-                  size="large"
-                  width="320"
-                  onSuccess={(credentialResponse) => {
-                    void handleGoogleLoginSuccess(
-                      credentialResponse.credential,
+              {GOOGLE_CLIENT_ID ? (
+                <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+                  <GoogleLogin
+                    text="continue_with"
+                    shape="pill"
+                    size="large"
+                    width="320"
+                    onSuccess={(credentialResponse) => {
+                      void handleGoogleLoginSuccess(
+                        credentialResponse.credential,
                       );
                     }}
                     onError={() => {
@@ -871,13 +709,18 @@ function handleLogout() {
                     }}
                   />
                 </GoogleOAuthProvider>
-              </div>
+              ) : (
+                <p className="error-message">
+                  Google sign-in is not configured.
+                </p>
+              )}
+            </div>
               {authError && (
                 <p className="error-message">{authError}</p>
               )}
             <div className="security-note">
               <Icon name="shield" size={15} />
-              Secure authentication and private storage
+              Google sign-in, protected API routes and demo limits
             </div>
           </div>
         </section>
@@ -901,45 +744,24 @@ function handleLogout() {
     );
   }
 
-  if (isAuthenticated && currentUser && !canUseWorkspace) {
+  if (isAuthenticated && !currentUser && profileError) {
     return (
       <main className="auth-layout">
         <section className="auth-form-side">
           <div className="auth-card">
             <div className="auth-card-heading">
-              <span>Account status</span>
-
-              <h2>
-                {!currentUser.email_verified
-                  ? "Verify your email"
-                  : "Verify your email"}
-              </h2>
-
-              <p>
-                {!currentUser.email_verified
-                  ? "Please verify your email address using the link sent to your inbox."
-                  : "Please verify your email before uploading PDFs or asking questions."}
-              </p>
+              <span>Account error</span>
+              <h2>We could not load your workspace</h2>
+              <p>{profileError}</p>
             </div>
-
-            <div className="security-note">
-              <Icon name="shield" size={15} />
-              Status: {currentUser.approval_status}
-            </div>
-
-            {profileError && (
-              <p className="error-message">{profileError}</p>
-            )}
 
             <button
               className="auth-submit"
               type="button"
               disabled={profileLoading}
-              onClick={() => void handleRefreshAccountStatus()}
+              onClick={() => void loadCurrentUser()}
             >
-              <span>
-                {profileLoading ? "Checking..." : "Refresh status"}
-              </span>
+              <span>{profileLoading ? "Checking..." : "Try again"}</span>
               {!profileLoading && <Icon name="refresh" size={17} />}
             </button>
 
@@ -967,7 +789,7 @@ function handleLogout() {
 
           <div>
             <strong>DocuMind</strong>
-            <span>AI Workspace</span>
+            <span>Document AI</span>
           </div>
         </div>
 
@@ -1015,14 +837,14 @@ function handleLogout() {
 
         {currentUser && !isAdmin && (
           <section className="upload-area">
-            <span className="section-caption">Demo usage</span>
+            <span className="section-caption">Public demo usage</span>
 
             <div className="private-status">
               <Icon name="document" size={16} />
 
               <div>
                 <strong>{pdfUsageText}</strong>
-                <span>Lifetime demo limit</span>
+                <span>Demo limit</span>
               </div>
             </div>
 
@@ -1031,87 +853,8 @@ function handleLogout() {
 
               <div>
                 <strong>{questionUsageText}</strong>
-                <span>Lifetime demo limit</span>
+                <span>Demo limit</span>
               </div>
-            </div>
-          </section>
-        )}
-
-        {isAdmin && (
-          <section className="upload-area">
-            <div className="library-header">
-              <div>
-                <span className="section-caption">Admin</span>
-                <strong>{pendingUsers.length} pending users</strong>
-              </div>
-
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Refresh pending users"
-                title="Refresh pending users"
-                disabled={pendingUsersLoading}
-                onClick={() => void loadPendingUsers()}
-              >
-                <Icon name="refresh" size={17} />
-              </button>
-            </div>
-
-            {pendingUsersError && (
-              <p className="error-message">{pendingUsersError}</p>
-            )}
-
-            {pendingUsersLoading && (
-              <p className="sidebar-message">
-                Loading pending users...
-              </p>
-            )}
-
-            {!pendingUsersLoading && pendingUsers.length === 0 && (
-              <p className="sidebar-message">
-                No verified users are waiting for approval.
-              </p>
-            )}
-
-            <div className="document-list">
-              {pendingUsers.map((user) => (
-                <div className="document-row" key={user.id}>
-                  <div className="document-item">
-                    <div className="document-item-icon">
-                      <Icon name="shield" size={17} />
-                    </div>
-
-                    <div className="document-item-text">
-                      <strong>{user.email}</strong>
-                      <span>{user.approval_status}</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="document-delete-button"
-                    title="Approve user"
-                    disabled={adminActionLoadingId !== null}
-                    onClick={() =>
-                      void handleAdminUserAction(user.id, "approve")
-                    }
-                  >
-                    <Icon name="check" size={15} />
-                  </button>
-
-                  <button
-                    type="button"
-                    className="document-delete-button"
-                    title="Reject user"
-                    disabled={adminActionLoadingId !== null}
-                    onClick={() =>
-                      void handleAdminUserAction(user.id, "reject")
-                    }
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
             </div>
           </section>
         )}
@@ -1257,7 +1000,7 @@ function handleLogout() {
 
           <div className="online-badge">
             <span />
-            {isAdmin ? "Admin ready" : "AI ready"}
+            {isAdmin ? "Admin ready" : "Ready"}
           </div>
         </header>
 
@@ -1277,7 +1020,7 @@ function handleLogout() {
 
               <p>
                 {selectedDocument
-                  ? "Ask questions, generate study materials and explore the document with AI."
+                  ? "Ask questions, generate study notes and review answers grounded in the selected PDF."
                   : "Upload or select a PDF from your document library."}
               </p>
             </div>
@@ -1296,7 +1039,7 @@ function handleLogout() {
                 Suggested actions
               </span>
 
-              <h2>Start with a useful prompt</h2>
+              <h2>Start with a document task</h2>
             </div>
 
             <div className="quick-action-grid">
@@ -1341,7 +1084,7 @@ function handleLogout() {
               <textarea
                 rows={3}
                 value={question}
-                placeholder="Ask anything about this document..."
+                placeholder="Ask a question about the selected PDF..."
                 onKeyDown={handleQuestionKeyDown}
                 onChange={(event) =>
                   setQuestion(event.target.value)
@@ -1367,7 +1110,7 @@ function handleLogout() {
                   <span>
                     {chatLoading
                       ? "Thinking..."
-                      : "Ask DocuMind"}
+                      : "Ask"}
                   </span>
 
                   <Icon name="send" size={16} />
@@ -1392,7 +1135,7 @@ function handleLogout() {
                   </div>
                 </div>
 
-                <h2>Your answer will appear here</h2>
+                <h2>Your grounded answer will appear here</h2>
 
                 <p>
                   Ask a question or select one of the suggested
@@ -1409,9 +1152,9 @@ function handleLogout() {
                   </div>
 
                   <div>
-                    <strong>Reading your document</strong>
+                    <strong>Searching relevant passages</strong>
                     <span>
-                      Preparing a grounded response...
+                      Preparing a source-grounded response...
                     </span>
                   </div>
                 </div>
@@ -1433,7 +1176,7 @@ function handleLogout() {
                   </div>
 
                   <div>
-                    <span>DocuMind response</span>
+                    <span>AI response</span>
                     <strong>Grounded in your PDF</strong>
                   </div>
                 </header>
@@ -1450,7 +1193,7 @@ function handleLogout() {
                   chatAnswer.sources.length > 0 && (
                     <details className="source-details">
                       <summary>
-                        <span>Sources and document chunks</span>
+                        <span>Retrieved source chunks</span>
 
                         <span className="source-count">
                           {chatAnswer.sources.length}
