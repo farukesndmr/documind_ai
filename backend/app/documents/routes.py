@@ -13,6 +13,12 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from app.auth.access_control import (
+    ensure_can_upload_pdf,
+    ensure_pdf_size_allowed,
+    ensure_user_can_use_app,
+    increment_pdf_upload_count,
+)
 from app.auth.dependencies import get_current_user
 from app.database.connection import get_db
 from app.documents.pdf_utils import extract_text_from_pdf
@@ -43,6 +49,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 UPLOAD_DIR = BACKEND_DIR / "uploads"
 
 
+def get_upload_file_size_bytes(file: UploadFile) -> int:
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    return file_size
+
+
 @router.post(
     "/upload",
     response_model=DocumentResponse,
@@ -53,11 +66,16 @@ def upload_document(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    ensure_can_upload_pdf(current_user)
+
     if file.content_type != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are allowed",
         )
+
+    file_size_bytes = get_upload_file_size_bytes(file)
+    ensure_pdf_size_allowed(file_size_bytes)
 
     UPLOAD_DIR.mkdir(
         parents=True,
@@ -103,6 +121,11 @@ def upload_document(
             chunks=chunks,
         )
 
+        increment_pdf_upload_count(
+            db=db,
+            user=current_user,
+        )
+
         return new_document
 
     except Exception:
@@ -128,6 +151,8 @@ def list_documents(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    ensure_user_can_use_app(current_user)
+
     return get_documents_by_user(
         db=db,
         owner_id=current_user.id,
@@ -143,6 +168,8 @@ def search_documents(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    ensure_user_can_use_app(current_user)
+
     return search_similar_chunks(
         db=db,
         query=search_data.query,
@@ -160,6 +187,8 @@ def delete_document(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    ensure_user_can_use_app(current_user)
+
     stored_file_path = delete_document_by_owner(
         db=db,
         document_id=document_id,
@@ -224,6 +253,8 @@ def list_document_chunks(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    ensure_user_can_use_app(current_user)
+
     documents = get_documents_by_user(
         db=db,
         owner_id=current_user.id,

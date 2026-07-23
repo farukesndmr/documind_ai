@@ -4,11 +4,27 @@ const API_BASE_URL =
 const ENDPOINTS = {
   register: "/auth/register",
   login: "/auth/login",
+  me: "/auth/me",
+  verifyEmail: "/auth/verify-email",
   documents: "/documents",
   documentsWithSlash: "/documents/",
   upload: "/documents/upload",
-  chat: "/chat",
   chatAsk: "/chat/ask",
+  adminUsers: "/admin/users",
+  adminPendingUsers: "/admin/users/pending",
+};
+
+export type UserProfile = {
+  id: number;
+  email: string;
+  role: string;
+  email_verified: boolean;
+  is_approved: boolean;
+  approval_status: string;
+  pdf_upload_count: number;
+  question_count: number;
+  can_use_app: boolean;
+  is_active: boolean;
 };
 
 export type DocumentItem = {
@@ -21,6 +37,12 @@ export type ChatAnswer = {
   answer: string;
   sources?: unknown[];
   raw?: unknown;
+};
+
+export type VerifyEmailResult = {
+  message: string;
+  email_verified: boolean;
+  approval_status?: string | null;
 };
 
 export function getToken(): string | null {
@@ -124,6 +146,21 @@ async function fetchFirstAvailable(
   throw new Error("Endpoint not found.");
 }
 
+function normalizeUserProfile(data: any): UserProfile {
+  return {
+    id: Number(data.id),
+    email: String(data.email),
+    role: String(data.role ?? "user"),
+    email_verified: Boolean(data.email_verified),
+    is_approved: Boolean(data.is_approved),
+    approval_status: String(data.approval_status ?? "pending"),
+    pdf_upload_count: Number(data.pdf_upload_count ?? 0),
+    question_count: Number(data.question_count ?? 0),
+    can_use_app: Boolean(data.can_use_app),
+    is_active: Boolean(data.is_active),
+  };
+}
+
 function normalizeDocument(document: any): DocumentItem {
   return {
     id: Number(
@@ -204,7 +241,7 @@ async function parseAuthResponse(
 export async function registerUser(
   email: string,
   password: string,
-): Promise<void> {
+): Promise<UserProfile> {
   const response = await fetchFirstAvailable(
     [ENDPOINTS.register, "/register"],
     () => ({
@@ -225,6 +262,9 @@ export async function registerUser(
       await readErrorMessage(response),
     );
   }
+
+  const data = await response.json();
+  return normalizeUserProfile(data);
 }
 
 export async function loginUser(
@@ -279,6 +319,48 @@ export async function loginUser(
   }
 
   return parseAuthResponse(formResponse);
+}
+
+export async function getMe(): Promise<UserProfile> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.me}`,
+    {
+      method: "GET",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  const data = await response.json();
+  return normalizeUserProfile(data);
+}
+
+export async function verifyEmail(
+  token: string,
+): Promise<VerifyEmailResult> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.verifyEmail}?token=${encodeURIComponent(
+      token,
+    )}`,
+    {
+      method: "GET",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  return response.json();
 }
 
 export async function getDocuments(): Promise<
@@ -361,9 +443,9 @@ export async function askQuestion(
   documentId: number,
   question: string,
 ): Promise<ChatAnswer> {
-  const response = await fetchFirstAvailable(
-    [ENDPOINTS.chat, ENDPOINTS.chatAsk],
-    () => ({
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.chatAsk}`,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -373,8 +455,9 @@ export async function askQuestion(
         document_id: documentId,
         question,
         message: question,
+        limit: 6,
       }),
-    }),
+    },
   );
 
   if (!response.ok) {
@@ -385,4 +468,96 @@ export async function askQuestion(
 
   const data = await response.json();
   return normalizeChatResponse(data);
+}
+
+export async function getAdminUsers(): Promise<UserProfile[]> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.adminUsers}`,
+    {
+      method: "GET",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  const data = await response.json();
+  return Array.isArray(data)
+    ? data.map(normalizeUserProfile)
+    : [];
+}
+
+export async function getPendingUsers(): Promise<UserProfile[]> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.adminPendingUsers}`,
+    {
+      method: "GET",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  const data = await response.json();
+  return Array.isArray(data)
+    ? data.map(normalizeUserProfile)
+    : [];
+}
+
+export async function approveUser(
+  userId: number,
+): Promise<UserProfile> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.adminUsers}/${userId}/approve`,
+    {
+      method: "PATCH",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  const data = await response.json();
+  return normalizeUserProfile(data);
+}
+
+export async function rejectUser(
+  userId: number,
+): Promise<UserProfile> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.adminUsers}/${userId}/reject`,
+    {
+      method: "PATCH",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response),
+    );
+  }
+
+  const data = await response.json();
+  return normalizeUserProfile(data);
 }

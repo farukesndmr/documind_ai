@@ -12,17 +12,23 @@ import "./App.css";
 import "./delete.css";
 
 import {
+  approveUser,
   askQuestion,
   clearToken,
   deleteDocument,
   getDocuments,
+  getMe,
+  getPendingUsers,
   getToken,
   loginUser,
   registerUser,
+  rejectUser,
   setToken,
   uploadDocument,
+  verifyEmail,
   type ChatAnswer,
   type DocumentItem,
+  type UserProfile,
 } from "./api";
 
 type IconName =
@@ -272,6 +278,28 @@ function App() {
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [authSuccess, setAuthSuccess] = useState("");
+
+  const [currentUser, setCurrentUser] =
+    useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState("");
+
+  const [verificationLoading, setVerificationLoading] =
+    useState(false);
+  const [verificationMessage, setVerificationMessage] =
+    useState("");
+  const [verificationError, setVerificationError] =
+    useState("");
+
+  const [pendingUsers, setPendingUsers] = useState<UserProfile[]>(
+    [],
+  );
+  const [pendingUsersLoading, setPendingUsersLoading] =
+    useState(false);
+  const [pendingUsersError, setPendingUsersError] = useState("");
+  const [adminActionLoadingId, setAdminActionLoadingId] =
+    useState<number | null>(null);
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<
@@ -294,11 +322,71 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
 
+  const verificationToken = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("token");
+  }, []);
+
   const selectedDocument = useMemo(() => {
     return documents.find(
       (document) => document.id === selectedDocumentId,
     );
   }, [documents, selectedDocumentId]);
+
+  const isAdmin = currentUser?.role === "admin";
+
+  const canUseWorkspace = Boolean(
+    currentUser &&
+      (isAdmin || currentUser.can_use_app || currentUser.is_active),
+  );
+
+  const pdfUsageText = currentUser
+    ? `${currentUser.pdf_upload_count}/1 PDF used`
+    : "PDF usage";
+
+  const questionUsageText = currentUser
+    ? `${currentUser.question_count}/2 questions used`
+    : "Question usage";
+
+  const loadCurrentUser = useCallback(async () => {
+    try {
+      setProfileLoading(true);
+      setProfileError("");
+
+      const data = await getMe();
+      setCurrentUser(data);
+
+      return data;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "User profile could not be loaded.";
+
+      setProfileError(message);
+      throw error;
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
+  const loadPendingUsers = useCallback(async () => {
+    try {
+      setPendingUsersLoading(true);
+      setPendingUsersError("");
+
+      const data = await getPendingUsers();
+      setPendingUsers(data);
+    } catch (error) {
+      setPendingUsersError(
+        error instanceof Error
+          ? error.message
+          : "Pending users could not be loaded.",
+      );
+    } finally {
+      setPendingUsersLoading(false);
+    }
+  }, []);
 
   const loadDocuments = useCallback(async () => {
     try {
@@ -331,10 +419,64 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      void loadDocuments();
+    if (!isAuthenticated) {
+      return;
     }
-  }, [isAuthenticated, loadDocuments]);
+
+    void (async () => {
+      try {
+        const profile = await loadCurrentUser();
+        const profileCanUseWorkspace =
+          profile.role === "admin" ||
+          profile.can_use_app ||
+          profile.is_active;
+
+        if (profileCanUseWorkspace) {
+          await loadDocuments();
+        } else {
+          setDocuments([]);
+          setSelectedDocumentId(null);
+        }
+
+        if (profile.role === "admin") {
+          await loadPendingUsers();
+        }
+      } catch {
+        // Error message is already stored in state.
+      }
+    })();
+  }, [
+    isAuthenticated,
+    loadCurrentUser,
+    loadDocuments,
+    loadPendingUsers,
+  ]);
+
+  useEffect(() => {
+    if (!verificationToken) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        setVerificationLoading(true);
+        setVerificationError("");
+        setVerificationMessage("");
+
+        const result = await verifyEmail(verificationToken);
+
+        setVerificationMessage(result.message);
+      } catch (error) {
+        setVerificationError(
+          error instanceof Error
+            ? error.message
+            : "Email verification failed.",
+        );
+      } finally {
+        setVerificationLoading(false);
+      }
+    })();
+  }, [verificationToken]);
 
   async function handleAuthSubmit(
     event: FormEvent<HTMLFormElement>,
@@ -351,9 +493,18 @@ function App() {
     try {
       setAuthLoading(true);
       setAuthError("");
+      setAuthSuccess("");
 
       if (authMode === "register") {
         await registerUser(cleanEmail, password);
+
+        setAuthMode("login");
+        setPassword("");
+        setAuthSuccess(
+          "Account created. Please verify your email, then wait for admin approval.",
+        );
+
+        return;
       }
 
       const token = await loginUser(cleanEmail, password);
@@ -376,6 +527,12 @@ function App() {
     clearToken();
 
     setIsAuthenticated(false);
+    setCurrentUser(null);
+    setProfileError("");
+    setProfileLoading(false);
+    setPendingUsers([]);
+    setPendingUsersError("");
+    setAdminActionLoadingId(null);
     setDocuments([]);
     setSelectedDocumentId(null);
     setChatAnswer(null);
@@ -410,6 +567,7 @@ function App() {
       await uploadDocument(file);
       setUploadMessage(`${file.name} uploaded successfully.`);
       await loadDocuments();
+      await loadCurrentUser();
       event.target.value = "";
     } catch (error) {
       setUploadError(
@@ -491,6 +649,7 @@ function App() {
       );
 
       setChatAnswer(answer);
+      await loadCurrentUser();
     } catch (error) {
       setChatError(
         error instanceof Error
@@ -519,6 +678,101 @@ function App() {
       event.preventDefault();
       void runQuestion(question);
     }
+  }
+
+  async function handleRefreshAccountStatus() {
+    try {
+      const profile = await loadCurrentUser();
+
+      if (
+        profile.role === "admin" ||
+        profile.can_use_app ||
+        profile.is_active
+      ) {
+        await loadDocuments();
+      }
+
+      if (profile.role === "admin") {
+        await loadPendingUsers();
+      }
+    } catch {
+      // Error message is already stored in state.
+    }
+  }
+
+  async function handleAdminUserAction(
+    userId: number,
+    action: "approve" | "reject",
+  ) {
+    try {
+      setAdminActionLoadingId(userId);
+      setPendingUsersError("");
+
+      if (action === "approve") {
+        await approveUser(userId);
+      } else {
+        await rejectUser(userId);
+      }
+
+      await loadPendingUsers();
+    } catch (error) {
+      setPendingUsersError(
+        error instanceof Error
+          ? error.message
+          : "Admin action failed.",
+      );
+    } finally {
+      setAdminActionLoadingId(null);
+    }
+  }
+
+  if (verificationToken && !isAuthenticated) {
+    return (
+      <main className="auth-layout">
+        <section className="auth-form-side">
+          <div className="auth-card">
+            <div className="auth-card-heading">
+              <span>Email verification</span>
+
+              <h2>Verify your DocuMind account</h2>
+
+              <p>
+                We are checking your verification link. After email
+                verification, your account must be approved by an admin.
+              </p>
+            </div>
+
+            {verificationLoading && (
+              <p className="sidebar-message">
+                Verifying your email...
+              </p>
+            )}
+
+            {verificationMessage && (
+              <p className="success-message">
+                <Icon name="check" size={14} />
+                {verificationMessage}
+              </p>
+            )}
+
+            {verificationError && (
+              <p className="error-message">{verificationError}</p>
+            )}
+
+            <button
+              className="auth-submit"
+              type="button"
+              onClick={() => {
+                window.location.href = "/";
+              }}
+            >
+              <span>Go to sign in</span>
+              <Icon name="arrow" size={17} />
+            </button>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   if (!isAuthenticated) {
@@ -648,6 +902,7 @@ function App() {
                 onClick={() => {
                   setAuthMode("login");
                   setAuthError("");
+                  setAuthSuccess("");
                 }}
               >
                 Sign in
@@ -659,6 +914,7 @@ function App() {
                 onClick={() => {
                   setAuthMode("register");
                   setAuthError("");
+                  setAuthSuccess("");
                 }}
               >
                 Register
@@ -705,6 +961,13 @@ function App() {
                 <p className="error-message">{authError}</p>
               )}
 
+              {authSuccess && (
+                <p className="success-message">
+                  <Icon name="check" size={14} />
+                  {authSuccess}
+                </p>
+              )}
+
               <button
                 className="auth-submit"
                 type="submit"
@@ -734,6 +997,78 @@ function App() {
     );
   }
 
+  if (profileLoading && !currentUser) {
+    return (
+      <main className="auth-layout">
+        <section className="auth-form-side">
+          <div className="auth-card">
+            <div className="auth-card-heading">
+              <span>Loading account</span>
+              <h2>Preparing your workspace</h2>
+              <p>Please wait while we check your account status.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (isAuthenticated && currentUser && !canUseWorkspace) {
+    return (
+      <main className="auth-layout">
+        <section className="auth-form-side">
+          <div className="auth-card">
+            <div className="auth-card-heading">
+              <span>Account status</span>
+
+              <h2>
+                {!currentUser.email_verified
+                  ? "Verify your email"
+                  : "Waiting for admin approval"}
+              </h2>
+
+              <p>
+                {!currentUser.email_verified
+                  ? "Please verify your email address using the link sent to your inbox."
+                  : "Your email is verified. An admin must approve your account before you can upload PDFs or ask questions."}
+              </p>
+            </div>
+
+            <div className="security-note">
+              <Icon name="shield" size={15} />
+              Status: {currentUser.approval_status}
+            </div>
+
+            {profileError && (
+              <p className="error-message">{profileError}</p>
+            )}
+
+            <button
+              className="auth-submit"
+              type="button"
+              disabled={profileLoading}
+              onClick={() => void handleRefreshAccountStatus()}
+            >
+              <span>
+                {profileLoading ? "Checking..." : "Refresh status"}
+              </span>
+              {!profileLoading && <Icon name="refresh" size={17} />}
+            </button>
+
+            <button
+              type="button"
+              className="logout-button"
+              onClick={handleLogout}
+            >
+              <Icon name="logout" size={17} />
+              Log out
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -755,7 +1090,7 @@ function App() {
             <input
               type="file"
               accept="application/pdf"
-              disabled={uploadLoading}
+              disabled={uploadLoading || !canUseWorkspace}
               onChange={handleFileUpload}
             />
 
@@ -789,6 +1124,109 @@ function App() {
             <p className="error-message">{uploadError}</p>
           )}
         </section>
+
+        {currentUser && !isAdmin && (
+          <section className="upload-area">
+            <span className="section-caption">Demo usage</span>
+
+            <div className="private-status">
+              <Icon name="document" size={16} />
+
+              <div>
+                <strong>{pdfUsageText}</strong>
+                <span>Lifetime demo limit</span>
+              </div>
+            </div>
+
+            <div className="private-status">
+              <Icon name="send" size={16} />
+
+              <div>
+                <strong>{questionUsageText}</strong>
+                <span>Lifetime demo limit</span>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {isAdmin && (
+          <section className="upload-area">
+            <div className="library-header">
+              <div>
+                <span className="section-caption">Admin</span>
+                <strong>{pendingUsers.length} pending users</strong>
+              </div>
+
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Refresh pending users"
+                title="Refresh pending users"
+                disabled={pendingUsersLoading}
+                onClick={() => void loadPendingUsers()}
+              >
+                <Icon name="refresh" size={17} />
+              </button>
+            </div>
+
+            {pendingUsersError && (
+              <p className="error-message">{pendingUsersError}</p>
+            )}
+
+            {pendingUsersLoading && (
+              <p className="sidebar-message">
+                Loading pending users...
+              </p>
+            )}
+
+            {!pendingUsersLoading && pendingUsers.length === 0 && (
+              <p className="sidebar-message">
+                No verified users are waiting for approval.
+              </p>
+            )}
+
+            <div className="document-list">
+              {pendingUsers.map((user) => (
+                <div className="document-row" key={user.id}>
+                  <div className="document-item">
+                    <div className="document-item-icon">
+                      <Icon name="shield" size={17} />
+                    </div>
+
+                    <div className="document-item-text">
+                      <strong>{user.email}</strong>
+                      <span>{user.approval_status}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="document-delete-button"
+                    title="Approve user"
+                    disabled={adminActionLoadingId !== null}
+                    onClick={() =>
+                      void handleAdminUserAction(user.id, "approve")
+                    }
+                  >
+                    <Icon name="check" size={15} />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="document-delete-button"
+                    title="Reject user"
+                    disabled={adminActionLoadingId !== null}
+                    onClick={() =>
+                      void handleAdminUserAction(user.id, "reject")
+                    }
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="library">
           <div className="library-header">
@@ -896,8 +1334,12 @@ function App() {
             <Icon name="shield" size={16} />
 
             <div>
-              <strong>Private workspace</strong>
-              <span>Protected account access</span>
+              <strong>
+                {isAdmin ? "Admin workspace" : "Private workspace"}
+              </strong>
+              <span>
+                {currentUser?.email ?? "Protected account access"}
+              </span>
             </div>
           </div>
 
@@ -927,7 +1369,7 @@ function App() {
 
           <div className="online-badge">
             <span />
-            AI ready
+            {isAdmin ? "Admin ready" : "AI ready"}
           </div>
         </header>
 
@@ -977,7 +1419,8 @@ function App() {
                   className="quick-action"
                   disabled={
                     selectedDocumentId === null ||
-                    chatLoading
+                    chatLoading ||
+                    !canUseWorkspace
                   }
                   onClick={() =>
                     void runQuestion(action.prompt)
@@ -1029,6 +1472,7 @@ function App() {
                   disabled={
                     chatLoading ||
                     selectedDocumentId === null ||
+                    !canUseWorkspace ||
                     !question.trim()
                   }
                 >

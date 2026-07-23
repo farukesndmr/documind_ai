@@ -9,3 +9,9 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email_verified: bool
+    approval_status: str | None = None

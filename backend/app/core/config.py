@@ -79,6 +79,27 @@ class Settings(BaseSettings):
             return None
         return self.OPENAI_API_KEY.get_secret_value()
 
+    # Demo access limits
+    DEMO_PDF_UPLOAD_LIMIT: int = 1
+    DEMO_QUESTION_LIMIT: int = 2
+    DEMO_MAX_PDF_SIZE_MB: int = 10
+
+    @property
+    def demo_max_pdf_size_bytes(self) -> int:
+        return self.DEMO_MAX_PDF_SIZE_MB * 1024 * 1024
+
+    # Email / SMTP
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: SecretStr | None = None
+    SMTP_USE_TLS: bool = True
+
+    EMAIL_FROM: str | None = None
+    EMAIL_FROM_NAME: str = "DocuMind AI"
+
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
+
     # Frontend / CORS
     FRONTEND_URL: str = "http://127.0.0.1:5173"
 

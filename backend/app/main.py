@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.database.connection import Base, engine
+from app.admin.routes import router as admin_router
 
 from app.users import models as user_models
 from app.documents import models as document_models
@@ -31,7 +32,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(chat_router)
-
+app.include_router(admin_router)
 
 @app.get("/")
 def root():
