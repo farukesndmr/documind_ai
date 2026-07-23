@@ -501,7 +501,7 @@ function App() {
         setAuthMode("login");
         setPassword("");
         setAuthSuccess(
-          "Account created. Please verify your email, then wait for admin approval.",
+          "Account created. Please verify your email to start using DocuMind.",
         );
 
         return;
@@ -737,8 +737,7 @@ function App() {
               <h2>Verify your DocuMind account</h2>
 
               <p>
-                We are checking your verification link. After email
-                verification, your account must be approved by an admin.
+                After verification, you can start using DocuMind with the demo limits.
               </p>
             </div>
 
@@ -1024,13 +1023,13 @@ function App() {
               <h2>
                 {!currentUser.email_verified
                   ? "Verify your email"
-                  : "Waiting for admin approval"}
+                  : "Verify your email"}
               </h2>
 
               <p>
                 {!currentUser.email_verified
                   ? "Please verify your email address using the link sent to your inbox."
-                  : "Your email is verified. An admin must approve your account before you can upload PDFs or ask questions."}
+                  : "Please verify your email before uploading PDFs or asking questions."}
               </p>
             </div>
 

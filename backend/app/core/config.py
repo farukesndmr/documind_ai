@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     # Demo access limits
     DEMO_PDF_UPLOAD_LIMIT: int = 1
     DEMO_QUESTION_LIMIT: int = 2
-    DEMO_MAX_PDF_SIZE_MB: int = 10
+    DEMO_MAX_PDF_SIZE_MB: int = 4
 
     @property
     def demo_max_pdf_size_bytes(self) -> int:

@@ -43,11 +43,7 @@ class User(Base):
 
     @property
     def can_use_app(self) -> bool:
-        return (
-            self.email_verified
-            and self.is_approved
-            and self.approval_status == "approved"
-        )
+        return self.email_verified
 
     @property
     def is_active(self) -> bool:

@@ -15,12 +15,6 @@ def ensure_user_can_use_app(user: User) -> None:
             detail="Please verify your email before using DocuMind AI.",
         )
 
-    if not user.is_approved or user.approval_status != "approved":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is waiting for admin approval.",
-        )
-
 
 def ensure_can_upload_pdf(user: User) -> None:
     ensure_user_can_use_app(user)
