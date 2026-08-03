@@ -321,27 +321,40 @@ function App() {
     ? `${currentUser.question_count}/2 questions used`
     : "Question usage";
 
-  const loadCurrentUser = useCallback(async () => {
-    try {
-      setProfileLoading(true);
-      setProfileError("");
+const clearSession = useCallback(() => {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("token");
 
-      const data = await getMe();
-      setCurrentUser(data);
+  setIsAuthenticated(false);
+  setCurrentUser(null);
+  setDocuments([]);
+  setSelectedDocumentId(null);
+  setChatAnswer(null);
+  setQuestion("");
+  setChatError("");
+  setDocumentsError("");
+  setUploadMessage("");
+  setUploadError("");
+  setProfileError("");
+  setDeletingDocumentId(null);
+}, []);
 
-      return data;
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "User profile could not be loaded.";
+const loadCurrentUser = useCallback(async () => {
+  try {
+    setProfileLoading(true);
+    setProfileError("");
 
-      setProfileError(message);
-      throw error;
-    } finally {
-      setProfileLoading(false);
-    }
-  }, []);
+    const data = await getMe();
+    setCurrentUser(data);
+
+    return data;
+  } catch (error) {
+    clearSession();
+    throw error;
+  } finally {
+    setProfileLoading(false);
+  }
+}, [clearSession]);
 
   const loadDocuments = useCallback(async () => {
     try {
@@ -425,21 +438,7 @@ function App() {
 
 
   function handleLogout() {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("token");
-
-    setIsAuthenticated(false);
-    setCurrentUser(null);
-    setProfileError("");
-    setDocuments([]);
-    setSelectedDocumentId(null);
-    setChatAnswer(null);
-    setQuestion("");
-    setChatError("");
-    setDocumentsError("");
-    setUploadMessage("");
-    setUploadError("");
-    setDeletingDocumentId(null);
+    clearSession();
   }
 
   async function handleFileUpload(
@@ -695,10 +694,12 @@ function App() {
               {GOOGLE_CLIENT_ID ? (
                 <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
                   <GoogleLogin
-                    text="continue_with"
+                    text="signin_with"
                     shape="pill"
                     size="large"
                     width="320"
+                    useOneTap={false}
+                    auto_select={false}
                     onSuccess={(credentialResponse) => {
                       void handleGoogleLoginSuccess(
                         credentialResponse.credential,
