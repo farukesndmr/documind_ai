@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Iterator
 from functools import lru_cache
 from typing import Any
 
@@ -124,3 +125,85 @@ def generate_with_llm(prompt: str, mode: str) -> str:
         raise LLMError("Model boş bir cevap döndürdü. Lütfen soruyu yeniden deneyin.")
 
     return answer
+
+
+def start_llm_stream(prompt: str, mode: str) -> Iterator[str]:
+    """Cevabı parça parça (token token) üreten bir akış başlatır.
+
+    Bütçe kontrolü ve OpenAI bağlantısı bu fonksiyon çağrıldığı anda yapılır;
+    böylece bu aşamadaki hatalar HTTP yanıtı başlamadan normal bir hata kodu
+    (429/503) olarak döner. Dönen iterator yalnızca metin parçalarını üretir
+    ve akış bittiğinde kullanımı bütçe sayacına kaydeder.
+    """
+    max_output_tokens = _get_max_output_tokens(mode)
+
+    try:
+        ensure_budget_available(
+            calculate_chat_cost(
+                input_tokens=_estimate_input_tokens(SYSTEM_INSTRUCTIONS + prompt),
+                output_tokens=max_output_tokens,
+            )
+        )
+    except BudgetExceededError as exc:
+        raise LLMBudgetError(str(exc)) from exc
+
+    try:
+        stream = _client().responses.create(
+            model=settings.OPENAI_MODEL,
+            instructions=SYSTEM_INSTRUCTIONS,
+            input=prompt,
+            max_output_tokens=max_output_tokens,
+            stream=True,
+        )
+    except LLMError:
+        raise
+    except Exception as exc:
+        logger.exception("OpenAI stream başlatılamadı: %s", type(exc).__name__)
+        raise LLMError(
+            "Yapay zekâ servisine şu anda ulaşılamıyor. Lütfen biraz sonra tekrar deneyin."
+        ) from exc
+
+    return _iterate_stream(stream, mode)
+
+
+def _iterate_stream(stream: Any, mode: str) -> Iterator[str]:
+    final_response = None
+
+    try:
+        for event in stream:
+            event_type = getattr(event, "type", "")
+
+            if event_type == "response.output_text.delta":
+                delta = getattr(event, "delta", "")
+                if delta:
+                    yield delta
+            elif event_type in ("response.completed", "response.incomplete"):
+                final_response = getattr(event, "response", None)
+            elif event_type in ("response.failed", "error"):
+                logger.error("OpenAI stream hatası: %s", event)
+                raise LLMError(
+                    "Cevap üretilirken bir sorun oluştu. Lütfen tekrar deneyin."
+                )
+    except LLMError:
+        raise
+    except Exception as exc:
+        logger.exception("OpenAI stream kesildi: %s", type(exc).__name__)
+        raise LLMError("Cevap akışı yarıda kesildi. Lütfen tekrar deneyin.") from exc
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            close()
+
+        if final_response is not None:
+            input_tokens, output_tokens = _extract_usage(final_response)
+            cost = calculate_chat_cost(input_tokens, output_tokens)
+            record_usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+            )
+            logger.info(
+                "OpenAI stream model=%s mode=%s input=%d output=%d cost=$%.6f",
+                settings.OPENAI_MODEL, mode, input_tokens, output_tokens, cost,
+            )
+

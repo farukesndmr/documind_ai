@@ -19,8 +19,10 @@ import { SourceList } from "./components/SourceList";
 
 import {
   askQuestion,
+  askQuestionStream,
   deleteDocument,
   getDocuments,
+  isStreamingUnavailable,
   isUnauthorized,
   getMe,
   getToken,
@@ -127,6 +129,8 @@ function App() {
   }, [documents, selectedDocumentId]);
 
   const isAdmin = currentUser?.role === "admin";
+
+  const hasAnswerText = Boolean(chatAnswer?.answer);
 
   const canUseWorkspace = Boolean(
     currentUser &&
@@ -387,17 +391,35 @@ const loadCurrentUser = useCallback(async () => {
       setChatError("");
       setChatAnswer(null);
 
-      const answer = await askQuestion(
-        selectedDocumentId,
-        cleanPrompt,
-      );
+      try {
+        await askQuestionStream(selectedDocumentId, cleanPrompt, {
+          onSources: (sources) => {
+            setChatAnswer({ answer: "", sources });
+          },
+          onDelta: (text) => {
+            setChatAnswer((current) =>
+              current
+                ? { ...current, answer: current.answer + text }
+                : { answer: text, sources: [] },
+            );
+          },
+        });
+      } catch (streamError) {
+        if (!isStreamingUnavailable(streamError)) {
+          throw streamError;
+        }
+        // Backend henüz streaming desteklemiyorsa normal isteğe dön.
+        const answer = await askQuestion(selectedDocumentId, cleanPrompt);
+        setChatAnswer(answer);
+      }
 
-      setChatAnswer(answer);
       await loadCurrentUser();
     } catch (error) {
       if (handleSessionError(error)) {
         return;
       }
+      // Akış metin gelmeden koptuysa boş cevap kartı kalmasın.
+      setChatAnswer((current) => (current?.answer ? current : null));
       setChatError(
         error instanceof Error
           ? error.message
@@ -854,7 +876,7 @@ const loadCurrentUser = useCallback(async () => {
               </div>
             )}
 
-            {chatLoading && (
+            {chatLoading && !hasAnswerText && (
               <div className="answer-loading">
                 <div className="loading-heading">
                   <div className="loading-icon">
@@ -879,7 +901,7 @@ const loadCurrentUser = useCallback(async () => {
               </div>
             )}
 
-            {chatAnswer && (
+            {chatAnswer && hasAnswerText && (
               <div className="answer-content">
                 <header className="answer-header">
                   <div className="answer-header-icon">
@@ -891,10 +913,17 @@ const loadCurrentUser = useCallback(async () => {
                     <strong>Grounded in your PDF</strong>
                   </div>
 
-                  <CopyButton text={chatAnswer.answer} />
+                  {!chatLoading && <CopyButton text={chatAnswer.answer} />}
                 </header>
 
-                <article className="markdown-answer">
+                <article
+                  className={
+                    chatLoading
+                      ? "markdown-answer streaming"
+                      : "markdown-answer"
+                  }
+                  aria-busy={chatLoading}
+                >
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                   >
@@ -902,7 +931,9 @@ const loadCurrentUser = useCallback(async () => {
                   </ReactMarkdown>
                 </article>
 
-                <SourceList sources={chatAnswer.sources} />
+                {!chatLoading && (
+                  <SourceList sources={chatAnswer.sources} />
+                )}
               </div>
             )}
           </section>

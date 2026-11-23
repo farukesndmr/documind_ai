@@ -49,13 +49,17 @@ def get_user_document(
     return document
 
 
-def answer_question_with_rag(
+def prepare_rag_prompt(
     db: Session,
     document_id: int,
     question: str,
     owner_id: int,
     limit: int = 8,
 ):
+    """Belge sahipliğini doğrular, ilgili parçaları getirir ve prompt'u hazırlar.
+
+    Normal ve streaming cevap akışları bu ortak adımı kullanır.
+    """
     get_user_document(
         db=db,
         document_id=document_id,
@@ -82,6 +86,24 @@ def answer_question_with_rag(
         question=question,
         chunks=chunks,
         mode=mode,
+    )
+
+    return prompt, mode, chunks
+
+
+def answer_question_with_rag(
+    db: Session,
+    document_id: int,
+    question: str,
+    owner_id: int,
+    limit: int = 8,
+):
+    prompt, mode, chunks = prepare_rag_prompt(
+        db=db,
+        document_id=document_id,
+        question=question,
+        owner_id=owner_id,
+        limit=limit,
     )
 
     try:
