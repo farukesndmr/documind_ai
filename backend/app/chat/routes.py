@@ -64,6 +64,7 @@ def ask(
             id=chunk.id,
             document_id=chunk.document_id,
             chunk_index=chunk.chunk_index,
+            page_number=chunk.page_number,
             content=chunk.content,
         )
         for chunk in chunks

@@ -47,7 +47,11 @@ class Settings(BaseSettings):
     OPENAI_SUMMARY_MODEL: str = "gpt-4o-mini"
 
     # OpenAI embeddings
+    # text-embedding-3 modelleri "dimensions" parametresiyle kısaltılabilir.
+    # 384, veritabanındaki vector(384) kolonuyla aynı olmalı.
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSIONS: int = 384
+    OPENAI_EMBEDDING_PRICE_PER_1M: float = 0.02
 
     # OpenAI usage limit
     OPENAI_HARD_LIMIT_USD: float = 1.70

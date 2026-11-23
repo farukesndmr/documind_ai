@@ -1,7 +1,7 @@
 import logging
 import shutil
+import tempfile
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -21,7 +21,7 @@ from app.auth.access_control import (
 )
 from app.auth.dependencies import get_current_user
 from app.database.connection import get_db
-from app.documents.pdf_utils import extract_text_from_pdf
+from app.documents.pdf_utils import extract_pages_from_pdf
 from app.documents.schemas import (
     ChunkSearchRequest,
     DocumentChunkResponse,
@@ -35,7 +35,7 @@ from app.documents.service import (
     get_documents_by_user,
     search_similar_chunks,
 )
-from app.documents.text_utils import split_text_into_chunks
+from app.documents.text_utils import split_pages_into_chunks
 
 
 router = APIRouter(
@@ -71,76 +71,87 @@ def upload_document(
     if file.content_type != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are allowed",
+            detail="Yalnızca PDF dosyaları yüklenebilir.",
         )
 
     file_size_bytes = get_upload_file_size_bytes(file)
     ensure_pdf_size_allowed(file_size_bytes)
 
-    UPLOAD_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    # Dosyanın gerçekten PDF olduğunu içeriğinden doğrula (uzantıya/başlığa güvenme).
+    if file.file.read(5) != b"%PDF-":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dosya geçerli bir PDF değil.",
+        )
+    file.file.seek(0)
 
-    original_filename = Path(
-        file.filename or "document.pdf"
-    ).name
+    original_filename = Path(file.filename or "document.pdf").name
 
-    unique_filename = (
-        f"{uuid4()}_{original_filename}"
-    )
-
-    file_path = UPLOAD_DIR / unique_filename
+    # PDF yalnızca metni çıkarmak için geçici bir dosyaya yazılır ve hemen silinir.
+    # Render gibi platformlarda disk kalıcı olmadığından dosyayı saklamak anlamsızdı;
+    # gereken her şey (metin, parçalar, embedding'ler) veritabanında tutuluyor.
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        temp_path = Path(tmp.name)
 
     try:
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(
-                file.file,
-                buffer,
-            )
+        try:
+            pages = extract_pages_from_pdf(str(temp_path))
+        except Exception as exc:
+            logger.warning("PDF okunamadı: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PDF okunamadı. Dosya bozuk veya şifreli olabilir.",
+            ) from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
 
-        extracted_text = extract_text_from_pdf(
-            str(file_path)
+    if not pages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Bu PDF'ten metin çıkarılamadı. Taranmış (resim) bir belge olabilir; "
+                "metin içeren bir PDF yükleyin."
+            ),
         )
 
-        new_document = create_document(
-            db=db,
-            title=original_filename,
-            file_path=str(file_path),
-            owner_id=current_user.id,
-            extracted_text=extracted_text,
-        )
+    chunks = split_pages_into_chunks(pages)
 
-        chunks = split_text_into_chunks(
-            extracted_text
-        )
+    new_document = create_document(
+        db=db,
+        title=original_filename,
+        file_path="",
+        owner_id=current_user.id,
+        extracted_text="\n\n".join(text for _, text in pages),
+    )
 
+    try:
         create_document_chunks(
             db=db,
             document_id=new_document.id,
             chunks=chunks,
         )
-
-        increment_pdf_upload_count(
-            db=db,
-            user=current_user,
-        )
-
-        return new_document
-
     except Exception:
-        if file_path.exists():
-            try:
-                file_path.unlink()
-            except OSError:
-                logger.exception(
-                    "Failed to remove incomplete PDF upload."
-                )
-
+        # Parçalar kaydedilemediyse yarım kalmış belgeyi geri al.
+        db.rollback()
+        delete_document_by_owner(
+            db=db,
+            document_id=new_document.id,
+            owner_id=current_user.id,
+        )
         raise
 
-    finally:
-        file.file.close()
+    increment_pdf_upload_count(
+        db=db,
+        user=current_user,
+    )
+
+    logger.info(
+        "Belge yüklendi: id=%s, %d sayfa, %d parça",
+        new_document.id, len(pages), len(chunks),
+    )
+
+    return new_document
 
 
 @router.get(
@@ -200,6 +211,17 @@ def delete_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
         )
+
+    file_deleted = False
+
+    # Yeni yüklenen belgeler diskte saklanmıyor (file_path boş).
+    # Eski belgelerin dosyası hâlâ duruyorsa silinir.
+    if not stored_file_path:
+        return {
+            "message": "Document deleted successfully",
+            "document_id": document_id,
+            "file_deleted": file_deleted,
+        }
 
     file_deleted = True
 

@@ -20,8 +20,14 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
     id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    document_id = Column(
+        Integer, ForeignKey("documents.id"), nullable=False, index=True
+    )
     content = Column(Text, nullable=False)
     chunk_index = Column(Integer, nullable=False)
+    page_number = Column(Integer, nullable=True)
     embedding = Column(Vector(384), nullable=True)
+    # Embedding'i üreten model ("text-embedding-3-small:384"). Boşsa veya eski
+    # bir değer taşıyorsa parça, ilk soruda otomatik olarak yeniden embed edilir.
+    embedding_model = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import json
+import logging
 import math
-import threading
-from datetime import datetime, timezone
-from pathlib import Path
+from functools import lru_cache
 from typing import Any
 
 from openai import OpenAI
 
 from app.core.config import settings
+from app.usage.service import (
+    BudgetExceededError,
+    calculate_chat_cost,
+    ensure_budget_available,
+    record_usage,
+)
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[2]
-USAGE_FILE = BACKEND_DIR / "data" / "openai_usage.json"
-USAGE_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_INSTRUCTIONS = """
@@ -36,291 +38,89 @@ Kesin kurallar:
 """.strip()
 
 
-def _current_month() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m")
+class LLMError(RuntimeError):
+    """Model cevabı üretilemediğinde fırlatılır. Mesajı kullanıcıya gösterilebilir."""
 
 
-def _default_usage() -> dict[str, Any]:
-    return {
-        "month": _current_month(),
-        "spent_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "request_count": 0,
-    }
-
-
-def _load_usage_unlocked() -> dict[str, Any]:
-    if not USAGE_FILE.exists():
-        return _default_usage()
-
-    try:
-        data = json.loads(
-            USAGE_FILE.read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError):
-        return _default_usage()
-
-    if data.get("month") != _current_month():
-        return _default_usage()
-
-    return {
-        "month": data.get("month", _current_month()),
-        "spent_usd": float(data.get("spent_usd", 0.0)),
-        "input_tokens": int(data.get("input_tokens", 0)),
-        "output_tokens": int(data.get("output_tokens", 0)),
-        "request_count": int(data.get("request_count", 0)),
-    }
-
-
-def _save_usage_unlocked(
-    usage: dict[str, Any],
-) -> None:
-    USAGE_FILE.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    temporary_file = USAGE_FILE.with_suffix(".tmp")
-
-    temporary_file.write_text(
-        json.dumps(
-            usage,
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    temporary_file.replace(USAGE_FILE)
+class LLMBudgetError(LLMError):
+    """Aylık kullanım limiti dolduğunda fırlatılır."""
 
 
 def _estimate_input_tokens(text: str) -> int:
-    """
-    İstek gönderilmeden önce güvenli tarafta kalmak için
-    yaklaşık token tahmini yapar.
-    """
-
-    return max(
-        1,
-        math.ceil(len(text) / 3),
-    )
-
-
-def _calculate_cost(
-    input_tokens: int,
-    output_tokens: int,
-) -> float:
-    input_cost = (
-        input_tokens / 1_000_000
-    ) * settings.OPENAI_INPUT_PRICE_PER_1M
-
-    output_cost = (
-        output_tokens / 1_000_000
-    ) * settings.OPENAI_OUTPUT_PRICE_PER_1M
-
-    return input_cost + output_cost
+    """İstek gönderilmeden önce güvenli tarafta kalmak için kaba token tahmini."""
+    return max(1, math.ceil(len(text) / 3))
 
 
 def _get_max_output_tokens(mode: str) -> int:
     if mode == "summary":
         return settings.OPENAI_SUMMARY_MAX_OUTPUT_TOKENS
-
     return settings.OPENAI_QA_MAX_OUTPUT_TOKENS
 
 
-def _check_budget_before_request(
-    prompt: str,
-    max_output_tokens: int,
-) -> None:
-    estimated_input_tokens = _estimate_input_tokens(
-        SYSTEM_INSTRUCTIONS + prompt
-    )
-
-    maximum_request_cost = _calculate_cost(
-        input_tokens=estimated_input_tokens,
-        output_tokens=max_output_tokens,
-    )
-
-    with USAGE_LOCK:
-        usage = _load_usage_unlocked()
-
-        projected_total = (
-            usage["spent_usd"]
-            + maximum_request_cost
-        )
-
-        if (
-            projected_total
-            > settings.OPENAI_HARD_LIMIT_USD
-        ):
-            raise RuntimeError(
-                "DocuMind için belirlenen aylık OpenAI "
-                "kullanım limiti doldu. "
-                f"Kaydedilen kullanım: "
-                f"${usage['spent_usd']:.4f}. "
-                f"Uygulama limiti: "
-                f"${settings.OPENAI_HARD_LIMIT_USD:.2f}."
-            )
-
-
-def _record_usage(
-    input_tokens: int,
-    output_tokens: int,
-) -> float:
-    request_cost = _calculate_cost(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-    )
-
-    with USAGE_LOCK:
-        usage = _load_usage_unlocked()
-
-        usage["spent_usd"] = round(
-            usage["spent_usd"] + request_cost,
-            8,
-        )
-
-        usage["input_tokens"] += input_tokens
-        usage["output_tokens"] += output_tokens
-        usage["request_count"] += 1
-
-        _save_usage_unlocked(usage)
-
-    return request_cost
-
-
-def _get_api_key() -> str:
+@lru_cache(maxsize=1)
+def _client() -> OpenAI:
     if settings.OPENAI_API_KEY is None:
-        raise RuntimeError(
-            "OPENAI_API_KEY bulunamadı. "
-            "backend/.env dosyasını kontrol et."
-        )
-
-    api_key = (
-        settings.OPENAI_API_KEY
-        .get_secret_value()
-        .strip()
-    )
-
+        raise LLMError("Yapay zekâ servisi yapılandırılmamış (OPENAI_API_KEY yok).")
+    api_key = settings.OPENAI_API_KEY.get_secret_value().strip()
     if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY boş bırakılamaz."
-        )
-
-    return api_key
+        raise LLMError("Yapay zekâ servisi yapılandırılmamış (OPENAI_API_KEY boş).")
+    return OpenAI(api_key=api_key, timeout=120.0, max_retries=2)
 
 
-def _extract_usage(
-    response: Any,
-) -> tuple[int, int]:
+def _extract_usage(response: Any) -> tuple[int, int]:
     usage = getattr(response, "usage", None)
-
     if usage is None:
         return 0, 0
-
-    input_tokens = int(
-        getattr(usage, "input_tokens", 0) or 0
+    return (
+        int(getattr(usage, "input_tokens", 0) or 0),
+        int(getattr(usage, "output_tokens", 0) or 0),
     )
 
-    output_tokens = int(
-        getattr(usage, "output_tokens", 0) or 0
-    )
 
-    return input_tokens, output_tokens
+def generate_with_llm(prompt: str, mode: str) -> str:
+    """Prompt'u modele gönderir ve cevabı döndürür.
 
+    Hata durumunda hata metnini cevapmış gibi döndürmek yerine LLMError fırlatır;
+    böylece kullanıcının soru hakkı boşa harcanmaz ve arayüz hatayı doğru gösterir.
+    """
+    max_output_tokens = _get_max_output_tokens(mode)
 
-def generate_with_llm(
-    prompt: str,
-    mode: str,
-) -> str:
     try:
-        max_output_tokens = _get_max_output_tokens(
-            mode
+        ensure_budget_available(
+            calculate_chat_cost(
+                input_tokens=_estimate_input_tokens(SYSTEM_INSTRUCTIONS + prompt),
+                output_tokens=max_output_tokens,
+            )
         )
+    except BudgetExceededError as exc:
+        raise LLMBudgetError(str(exc)) from exc
 
-        _check_budget_before_request(
-            prompt=prompt,
-            max_output_tokens=max_output_tokens,
-        )
-
-        client = OpenAI(
-            api_key=_get_api_key(),
-            timeout=120.0,
-        )
-
-        response = client.responses.create(
+    try:
+        response = _client().responses.create(
             model=settings.OPENAI_MODEL,
             instructions=SYSTEM_INSTRUCTIONS,
             input=prompt,
             max_output_tokens=max_output_tokens,
         )
+    except LLMError:
+        raise
+    except Exception as exc:
+        logger.exception("OpenAI isteği başarısız: %s", type(exc).__name__)
+        raise LLMError(
+            "Yapay zekâ servisine şu anda ulaşılamıyor. Lütfen biraz sonra tekrar deneyin."
+        ) from exc
 
-        answer = (
-            response.output_text or ""
-        ).strip()
+    answer = (response.output_text or "").strip()
+    input_tokens, output_tokens = _extract_usage(response)
+    cost = calculate_chat_cost(input_tokens, output_tokens)
+    record_usage(input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost)
 
-        input_tokens, output_tokens = _extract_usage(
-            response
-        )
+    logger.info(
+        "OpenAI model=%s mode=%s input=%d output=%d cost=$%.6f",
+        settings.OPENAI_MODEL, mode, input_tokens, output_tokens, cost,
+    )
 
-        request_cost = _record_usage(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
+    if not answer:
+        raise LLMError("Model boş bir cevap döndürdü. Lütfen soruyu yeniden deneyin.")
 
-        print(
-            f"OpenAI model: {settings.OPENAI_MODEL} | "
-            f"Mode: {mode} | "
-            f"Input tokens: {input_tokens} | "
-            f"Output tokens: {output_tokens} | "
-            f"Estimated cost: ${request_cost:.6f}"
-        )
-
-        if not answer:
-            return (
-                "Model boş bir cevap döndürdü. "
-                "Lütfen soruyu yeniden deneyin."
-            )
-
-        return answer
-
-    except RuntimeError as error:
-        return str(error)
-
-    except Exception as error:
-        print(
-            "OpenAI request error: "
-            f"{type(error).__name__}: {error}"
-        )
-
-        return (
-            "OpenAI ile cevap oluşturulurken hata oluştu. "
-            "Backend terminalindeki hata mesajını kontrol et."
-        )
-
-
-def get_openai_usage() -> dict[str, Any]:
-    """
-    Daha sonra admin panelinde kullanım miktarını
-    göstermek için kullanacağız.
-    """
-
-    with USAGE_LOCK:
-        usage = _load_usage_unlocked()
-
-    return {
-        **usage,
-        "hard_limit_usd": (
-            settings.OPENAI_HARD_LIMIT_USD
-        ),
-        "remaining_usd": round(
-            max(
-                settings.OPENAI_HARD_LIMIT_USD
-                - usage["spent_usd"],
-                0,
-            ),
-            8,
-        ),
-        "model": settings.OPENAI_MODEL,
-    }
+    return answer

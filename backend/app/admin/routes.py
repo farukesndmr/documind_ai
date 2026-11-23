@@ -5,6 +5,7 @@ from app.auth.dependencies import get_current_user
 from app.database.connection import get_db
 from app.users.models import User
 from app.users.schemas import UserResponse
+from app.usage.service import get_usage
 from app.users.service import (
     approve_user,
     get_all_users,
@@ -102,3 +103,8 @@ def reject_user_access(
         )
 
     return reject_user(db, user, admin_user)
+
+@router.get("/usage")
+def openai_usage(admin_user: User = Depends(require_admin)):
+    """Bu ayki yapay zekâ kullanımı ve kalan bütçe."""
+    return get_usage()
