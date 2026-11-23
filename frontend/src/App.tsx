@@ -11,15 +11,17 @@ import remarkGfm from "remark-gfm";
 import "./App.css";
 import "./delete.css";
 
-import {
-  GoogleLogin,
-  GoogleOAuthProvider,
-} from "@react-oauth/google";
+import { CopyButton } from "./components/CopyButton";
+import { Icon, type IconName } from "./components/Icon";
+import { LoginPage } from "./components/LoginPage";
+import { ServerStatus } from "./components/ServerStatus";
+import { SourceList } from "./components/SourceList";
 
 import {
   askQuestion,
   deleteDocument,
   getDocuments,
+  isUnauthorized,
   getMe,
   getToken,
   loginWithGoogle,
@@ -30,23 +32,6 @@ import {
   type UserProfile,
 } from "./api";
 
-
-type IconName =
-  | "logo"
-  | "upload"
-  | "document"
-  | "refresh"
-  | "logout"
-  | "sparkles"
-  | "send"
-  | "summary"
-  | "flashcards"
-  | "quiz"
-  | "concepts"
-  | "shield"
-  | "arrow"
-  | "check"
-  | "trash";
 
 type QuickAction = {
   title: string;
@@ -86,167 +71,6 @@ const QUICK_ACTIONS: QuickAction[] = [
   },
 ];
 
-function Icon({
-  name,
-  size = 18,
-}: {
-  name: IconName;
-  size?: number;
-}) {
-  const iconProps = {
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.8,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-
-  switch (name) {
-    case "logo":
-      return (
-        <svg {...iconProps}>
-          <path d="M7 3.5h7.5L19 8v8.5A4.5 4.5 0 0 1 14.5 21H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z" />
-          <path d="M14 3.5V9h5" />
-          <path d="m8.5 15 2 2 5-5" />
-        </svg>
-      );
-
-    case "upload":
-      return (
-        <svg {...iconProps}>
-          <path d="M12 16V4" />
-          <path d="m7 9 5-5 5 5" />
-          <path d="M5 20h14" />
-        </svg>
-      );
-
-    case "document":
-      return (
-        <svg {...iconProps}>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-          <path d="M14 2v6h6" />
-          <path d="M8 13h8" />
-          <path d="M8 17h5" />
-        </svg>
-      );
-
-    case "refresh":
-      return (
-        <svg {...iconProps}>
-          <path d="M20 7v5h-5" />
-          <path d="M4 17v-5h5" />
-          <path d="M18.4 9A7 7 0 0 0 6.7 6.4L4 9" />
-          <path d="M5.6 15a7 7 0 0 0 11.7 2.6L20 15" />
-        </svg>
-      );
-
-    case "logout":
-      return (
-        <svg {...iconProps}>
-          <path d="M10 17l5-5-5-5" />
-          <path d="M15 12H3" />
-          <path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
-        </svg>
-      );
-
-    case "sparkles":
-      return (
-        <svg {...iconProps}>
-          <path d="m12 3-1.2 3.2L7.5 7.5l3.3 1.3L12 12l1.2-3.2 3.3-1.3-3.3-1.3Z" />
-          <path d="m18 13-.8 2.2L15 16l2.2.8L18 19l.8-2.2L21 16l-2.2-.8Z" />
-          <path d="m5 14-.6 1.6-1.4.6 1.4.6L5 18.4l.6-1.6 1.4-.6-1.4-.6Z" />
-        </svg>
-      );
-
-    case "send":
-      return (
-        <svg {...iconProps}>
-          <path d="m22 2-7 20-4-9-9-4Z" />
-          <path d="M22 2 11 13" />
-        </svg>
-      );
-
-    case "summary":
-      return (
-        <svg {...iconProps}>
-          <path d="M5 5h14" />
-          <path d="M5 10h14" />
-          <path d="M5 15h9" />
-          <path d="M5 20h6" />
-        </svg>
-      );
-
-    case "flashcards":
-      return (
-        <svg {...iconProps}>
-          <rect x="3" y="5" width="14" height="16" rx="2" />
-          <path d="M7 9h6" />
-          <path d="M7 13h4" />
-          <path d="M7 3h12a2 2 0 0 1 2 2v14" />
-        </svg>
-      );
-
-    case "quiz":
-      return (
-        <svg {...iconProps}>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M9.7 9a2.5 2.5 0 1 1 4.1 1.9C12.9 11.6 12 12 12 13.2" />
-          <path d="M12 17h.01" />
-        </svg>
-      );
-
-    case "concepts":
-      return (
-        <svg {...iconProps}>
-          <path d="M9 18h6" />
-          <path d="M10 22h4" />
-          <path d="M8.5 14.5A6 6 0 1 1 15.5 14.5C14.6 15.3 14 16.2 14 17h-4c0-.8-.6-1.7-1.5-2.5Z" />
-        </svg>
-      );
-
-    case "shield":
-      return (
-        <svg {...iconProps}>
-          <path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10Z" />
-          <path d="m9 12 2 2 4-4" />
-        </svg>
-      );
-
-    case "arrow":
-      return (
-        <svg {...iconProps}>
-          <path d="M5 12h14" />
-          <path d="m14 7 5 5-5 5" />
-        </svg>
-      );
-
-    case "check":
-      return (
-        <svg {...iconProps}>
-          <path d="m5 12 4 4L19 6" />
-        </svg>
-      );
-
-    case "trash":
-      return (
-        <svg {...iconProps}>
-          <path d="M3 6h18" />
-          <path d="M8 6V4h8v2" />
-          <path d="M19 6l-1 15H6L5 6" />
-          <path d="M10 11v6" />
-          <path d="M14 11v6" />
-        </svg>
-      );
-
-    default:
-      return null;
-  }
-}
-
 function formatDate(value?: string) {
   if (!value) {
     return "PDF document";
@@ -264,7 +88,6 @@ function formatDate(value?: string) {
     year: "numeric",
   }).format(date);
 }
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(
     Boolean(getToken()),
@@ -339,6 +162,18 @@ const clearSession = useCallback(() => {
   setDeletingDocumentId(null);
 }, []);
 
+  const handleSessionError = useCallback(
+    (error: unknown): boolean => {
+      if (!isUnauthorized(error)) {
+        return false;
+      }
+      clearSession();
+      setAuthError("Your session has expired. Please sign in again.");
+      return true;
+    },
+    [clearSession],
+  );
+
 const loadCurrentUser = useCallback(async () => {
   try {
     setProfileLoading(true);
@@ -350,6 +185,9 @@ const loadCurrentUser = useCallback(async () => {
     return data;
   } catch (error) {
     clearSession();
+    if (isUnauthorized(error)) {
+      setAuthError("Your session has expired. Please sign in again.");
+    }
     throw error;
   } finally {
     setProfileLoading(false);
@@ -376,6 +214,9 @@ const loadCurrentUser = useCallback(async () => {
         return currentDocumentExists ? currentId : data[0].id;
       });
     } catch (error) {
+      if (handleSessionError(error)) {
+        return;
+      }
       setDocumentsError(
         error instanceof Error
           ? error.message
@@ -384,7 +225,7 @@ const loadCurrentUser = useCallback(async () => {
     } finally {
       setDocumentsLoading(false);
     }
-  }, []);
+  }, [handleSessionError]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -467,6 +308,9 @@ const loadCurrentUser = useCallback(async () => {
       await loadCurrentUser();
       event.target.value = "";
     } catch (error) {
+      if (handleSessionError(error)) {
+        return;
+      }
       setUploadError(
         error instanceof Error
           ? error.message
@@ -510,6 +354,9 @@ const loadCurrentUser = useCallback(async () => {
         setChatError("");
       }
     } catch (error) {
+      if (handleSessionError(error)) {
+        return;
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -548,6 +395,9 @@ const loadCurrentUser = useCallback(async () => {
       setChatAnswer(answer);
       await loadCurrentUser();
     } catch (error) {
+      if (handleSessionError(error)) {
+        return;
+      }
       setChatError(
         error instanceof Error
           ? error.message
@@ -579,153 +429,11 @@ const loadCurrentUser = useCallback(async () => {
 
   if (!isAuthenticated) {
     return (
-      <main className="auth-layout">
-        <section className="auth-showcase">
-          <div className="auth-brand">
-            <div className="logo-box">
-              <Icon name="logo" size={22} />
-            </div>
-
-            <div>
-              <strong>DocuMind</strong>
-              <span>AI document workspace</span>
-            </div>
-          </div>
-
-          <div className="showcase-content">
-            <div className="showcase-badge">
-              <Icon name="sparkles" size={15} />
-              Production RAG document assistant
-            </div>
-
-            <h1>
-              Ask better questions from
-              <span> your PDFs.</span>
-            </h1>
-
-            <p>
-              Upload a PDF, retrieve relevant passages and get
-              source-grounded answers with an AI workflow.
-            </p>
-
-            <div className="showcase-features">
-              <article>
-                <div className="feature-icon">
-                  <Icon name="document" size={19} />
-                </div>
-
-                <div>
-                  <strong>Grounded answers</strong>
-                  <span>Responses generated from your documents.</span>
-                </div>
-              </article>
-
-              <article>
-                <div className="feature-icon">
-                  <Icon name="shield" size={19} />
-                </div>
-
-                <div>
-                  <strong>Private workspace</strong>
-                  <span>Your documents remain inside your account.</span>
-                </div>
-              </article>
-            </div>
-
-            <div className="showcase-preview">
-              <div className="preview-header">
-                <div>
-                  <Icon name="document" size={16} />
-                  Lecture_9.pdf
-                </div>
-
-                <span>PDF</span>
-              </div>
-
-              <div className="preview-question">
-                What are the differences between Traditional and
-                Agile V&amp;V?
-              </div>
-
-              <div className="preview-response">
-                <div className="preview-ai-icon">
-                  <Icon name="sparkles" size={15} />
-                </div>
-
-                <div className="preview-lines">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <footer className="showcase-footer">
-            <span>Built as a full-stack AI portfolio project.</span>
-            <span>DocuMind AI</span>
-          </footer>
-        </section>
-
-        <section className="auth-form-side">
-          <div className="auth-card">
-            <div className="mobile-auth-brand">
-              <div className="logo-box">
-                <Icon name="logo" size={21} />
-              </div>
-
-              <strong>DocuMind</strong>
-            </div>
-
-            <div className="auth-card-heading">
-              <span>
-                Continue with Google
-              </span>
-
-              <h2>
-                Enter your workspace
-              </h2>
-
-              <p>
-                Sign in or create an account with your Google account.
-              </p>
-            </div>
-            <div className="google-login-box">
-              {GOOGLE_CLIENT_ID ? (
-                <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-                  <GoogleLogin
-                    text="signin_with"
-                    shape="pill"
-                    size="large"
-                    width="320"
-                    useOneTap={false}
-                    auto_select={false}
-                    onSuccess={(credentialResponse) => {
-                      void handleGoogleLoginSuccess(
-                        credentialResponse.credential,
-                      );
-                    }}
-                    onError={() => {
-                      setAuthError("Google login failed.");
-                    }}
-                  />
-                </GoogleOAuthProvider>
-              ) : (
-                <p className="error-message">
-                  Google sign-in is not configured.
-                </p>
-              )}
-            </div>
-              {authError && (
-                <p className="error-message">{authError}</p>
-              )}
-            <div className="security-note">
-              <Icon name="shield" size={15} />
-              Google sign-in, protected API routes and demo limits
-            </div>
-          </div>
-        </section>
-      </main>
+      <LoginPage
+        authError={authError}
+        onCredential={handleGoogleLoginSuccess}
+        onGoogleError={() => setAuthError("Google sign-in failed. Please try again.")}
+      />
     );
   }
 
@@ -987,6 +695,7 @@ const loadCurrentUser = useCallback(async () => {
       </aside>
 
       <section className="main-workspace">
+        <ServerStatus />
         <header className="topbar">
           <div className="breadcrumb">
             <span>Workspace</span>
@@ -1155,7 +864,8 @@ const loadCurrentUser = useCallback(async () => {
                   <div>
                     <strong>Searching relevant passages</strong>
                     <span>
-                      Preparing a source-grounded response...
+                      Preparing a source-grounded response. Summaries
+                      and quizzes can take 10–30 seconds.
                     </span>
                   </div>
                 </div>
@@ -1180,6 +890,8 @@ const loadCurrentUser = useCallback(async () => {
                     <span>AI response</span>
                     <strong>Grounded in your PDF</strong>
                   </div>
+
+                  <CopyButton text={chatAnswer.answer} />
                 </header>
 
                 <article className="markdown-answer">
@@ -1190,26 +902,7 @@ const loadCurrentUser = useCallback(async () => {
                   </ReactMarkdown>
                 </article>
 
-                {chatAnswer.sources &&
-                  chatAnswer.sources.length > 0 && (
-                    <details className="source-details">
-                      <summary>
-                        <span>Retrieved source chunks</span>
-
-                        <span className="source-count">
-                          {chatAnswer.sources.length}
-                        </span>
-                      </summary>
-
-                      <pre>
-                        {JSON.stringify(
-                          chatAnswer.sources,
-                          null,
-                          2,
-                        )}
-                      </pre>
-                    </details>
-                  )}
+                <SourceList sources={chatAnswer.sources} />
               </div>
             )}
           </section>

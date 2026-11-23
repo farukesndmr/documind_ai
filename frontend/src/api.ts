@@ -33,11 +33,55 @@ export type DocumentItem = {
   created_at?: string;
 };
 
+export type SourceChunk = {
+  id: number;
+  document_id: number;
+  chunk_index: number;
+  page_number?: number | null;
+  content: string;
+};
+
 export type ChatAnswer = {
   answer: string;
-  sources?: unknown[];
+  sources: SourceChunk[];
   raw?: unknown;
 };
+
+/** HTTP durum kodunu da taşıyan hata; 401'de oturumu kapatmak için kullanılır. */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isUnauthorized(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
+
+/**
+ * Backend'in ayakta olup olmadığını kontrol eder. Ücretsiz sunucu uyuyorsa
+ * ilk istek uzun sürer; arayüz bu sürede kullanıcıyı bilgilendirir.
+ */
+export async function pingServer(timeoutMs = 60000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
 
 export type VerifyEmailResult = {
   message: string;
@@ -258,8 +302,9 @@ export async function registerUser(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -313,8 +358,9 @@ export async function loginUser(
     );
 
   if (!formResponse.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(formResponse),
+      formResponse.status,
     );
   }
 
@@ -337,8 +383,9 @@ export async function loginWithGoogle(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -356,8 +403,9 @@ export async function getMe(): Promise<UserProfile> {
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -378,8 +426,9 @@ export async function verifyEmail(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -400,8 +449,9 @@ export async function getDocuments(): Promise<
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -427,8 +477,9 @@ export async function uploadDocument(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -449,8 +500,9 @@ export async function deleteDocument(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 }
@@ -477,8 +529,9 @@ export async function askQuestion(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -498,8 +551,9 @@ export async function getAdminUsers(): Promise<UserProfile[]> {
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -521,8 +575,9 @@ export async function getPendingUsers(): Promise<UserProfile[]> {
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -546,8 +601,9 @@ export async function approveUser(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
@@ -569,8 +625,9 @@ export async function rejectUser(
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       await readErrorMessage(response),
+      response.status,
     );
   }
 
