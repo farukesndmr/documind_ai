@@ -4,11 +4,11 @@ from pydantic import BaseModel, Field
 
 
 class DocumentResponse(BaseModel):
+    """Liste ve yükleme cevabı. Tam metin ve sunucu dosya yolu bilerek dönülmez:
+    hem cevabı hafifletir hem de sunucu içi bilgileri dışarı sızdırmaz."""
+
     id: int
     title: str
-    file_path: str
-    extracted_text: str | None
-    owner_id: int
     created_at: datetime
 
     class Config:
@@ -20,6 +20,7 @@ class DocumentChunkResponse(BaseModel):
     document_id: int
     content: str
     chunk_index: int
+    page_number: int | None = None
     created_at: datetime
 
     class Config:
@@ -27,5 +28,5 @@ class DocumentChunkResponse(BaseModel):
 
 
 class ChunkSearchRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=5, ge=1, le=10)

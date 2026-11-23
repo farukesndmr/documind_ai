@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.documents.models import Document
-from app.rag.llm import generate_with_llm
+from app.rag.llm import LLMBudgetError, LLMError, generate_with_llm
 from app.rag.prompt_builder import build_prompt
 from app.rag.retriever import retrieve_context_chunks
 
@@ -72,7 +72,10 @@ def answer_question_with_rag(
     if not chunks:
         raise HTTPException(
             status_code=404,
-            detail="No chunks found for this document.",
+            detail=(
+                "Bu belgede okunabilir metin bulunamadı. "
+                "Belge taranmış (resim) bir PDF olabilir."
+            ),
         )
 
     prompt = build_prompt(
@@ -81,9 +84,14 @@ def answer_question_with_rag(
         mode=mode,
     )
 
-    answer = generate_with_llm(
-        prompt=prompt,
-        mode=mode,
-    )
+    try:
+        answer = generate_with_llm(
+            prompt=prompt,
+            mode=mode,
+        )
+    except LLMBudgetError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return answer, chunks
