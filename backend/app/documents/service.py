@@ -64,6 +64,22 @@ def get_document_by_id_and_owner(
     )
 
 
+def rename_document_by_owner(
+    db: Session,
+    document_id: int,
+    owner_id: int,
+    title: str,
+):
+    document = get_document_by_id_and_owner(db, document_id, owner_id)
+    if document is None:
+        return None
+
+    document.title = title
+    db.commit()
+    db.refresh(document)
+    return document
+
+
 def create_document_chunks(
     db: Session,
     document_id: int,

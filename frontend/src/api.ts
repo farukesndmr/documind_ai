@@ -817,3 +817,29 @@ export async function clearChatHistory(
   }
 }
 
+export async function renameDocument(
+  documentId: number,
+  title: string,
+): Promise<DocumentItem> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.documents}/${documentId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ title }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      await readErrorMessage(response),
+      response.status,
+    );
+  }
+
+  return normalizeDocument(await response.json());
+}
+

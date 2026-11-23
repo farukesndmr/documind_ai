@@ -10,6 +10,8 @@ import "./App.css";
 import "./delete.css";
 
 import { ChatThread } from "./components/ChatThread";
+import { DocumentTitle } from "./components/DocumentTitle";
+import { displayTitle } from "./documentTitle";
 import { Icon, type IconName } from "./components/Icon";
 import { LoginPage } from "./components/LoginPage";
 import { ServerStatus } from "./components/ServerStatus";
@@ -21,6 +23,7 @@ import {
   askQuestionStream,
   clearChatHistory,
   getChatHistory,
+  renameDocument,
   deleteDocument,
   getDocuments,
   isStreamingUnavailable,
@@ -445,6 +448,24 @@ const loadCurrentUser = useCallback(async () => {
     }
   }
 
+  async function handleRenameDocument(documentId: number, title: string) {
+    try {
+      const updated = await renameDocument(documentId, title);
+      setDocuments((current) =>
+        current.map((document) =>
+          document.id === documentId
+            ? { ...document, filename: updated.filename }
+            : document,
+        ),
+      );
+    } catch (error) {
+      if (handleSessionError(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async function runQuestion(promptText: string) {
     if (selectedDocumentId === null) {
       setChatError("Please select a document first.");
@@ -831,7 +852,9 @@ const loadCurrentUser = useCallback(async () => {
                     </div>
 
                     <div className="document-item-text">
-                      <strong>{document.filename}</strong>
+                      <strong title={document.filename}>
+                        {displayTitle(document.filename)}
+                      </strong>
                       <span>
                         {formatDate(document.created_at)}
                       </span>
@@ -898,7 +921,7 @@ const loadCurrentUser = useCallback(async () => {
 
             <strong>
               {selectedDocument
-                ? selectedDocument.filename
+                ? displayTitle(selectedDocument.filename)
                 : "No document selected"}
             </strong>
           </div>
@@ -917,11 +940,18 @@ const loadCurrentUser = useCallback(async () => {
                 Active document
               </div>
 
-              <h1>
-                {selectedDocument
-                  ? selectedDocument.filename
-                  : "Choose a document"}
-              </h1>
+              {selectedDocument ? (
+                <DocumentTitle
+                  key={selectedDocument.id}
+                  title={selectedDocument.filename}
+                  disabled={chatLoading}
+                  onRename={(title) =>
+                    handleRenameDocument(selectedDocument.id, title)
+                  }
+                />
+              ) : (
+                <h1>Choose a document</h1>
+              )}
 
               <p>
                 {selectedDocument

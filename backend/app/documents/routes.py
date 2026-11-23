@@ -25,6 +25,7 @@ from app.documents.pdf_utils import extract_pages_from_pdf
 from app.documents.schemas import (
     ChunkSearchRequest,
     DocumentChunkResponse,
+    DocumentRenameRequest,
     DocumentResponse,
 )
 from app.documents.service import (
@@ -33,6 +34,7 @@ from app.documents.service import (
     delete_document_by_owner,
     get_chunks_by_document,
     get_documents_by_user,
+    rename_document_by_owner,
     search_similar_chunks,
 )
 from app.documents.text_utils import split_pages_into_chunks
@@ -187,6 +189,35 @@ def search_documents(
         owner_id=current_user.id,
         limit=search_data.limit,
     )
+
+
+@router.patch(
+    "/{document_id}",
+    response_model=DocumentResponse,
+)
+def rename_document(
+    document_id: int,
+    request_data: DocumentRenameRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Belgenin görünen adını değiştirir (yalnızca belgenin sahibi)."""
+    ensure_user_can_use_app(current_user)
+
+    document = rename_document_by_owner(
+        db=db,
+        document_id=document_id,
+        owner_id=current_user.id,
+        title=request_data.title,
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    return document
 
 
 @router.delete(
