@@ -49,9 +49,42 @@ function SourceCard({
   );
 }
 
-export function SourceList({ sources }: { sources: SourceChunk[] }) {
+export function SourceList({
+  sources,
+  collapsible = false,
+}: {
+  sources: SourceChunk[];
+  collapsible?: boolean;
+}) {
   if (sources.length === 0) {
     return null;
+  }
+
+  const grid = (
+    <ol className="source-grid">
+      {sources.map((source, index) => (
+        <SourceCard key={source.id} source={source} number={index + 1} />
+      ))}
+    </ol>
+  );
+
+  if (collapsible) {
+    return (
+      <details className="sources collapsible">
+        <summary className="sources-header">
+          <span>
+            Sources <span className="source-count">{sources.length}</span>
+          </span>
+          <span className="sources-summary-hint">
+            [1], [2]… in the answer refer to these passages
+            <span className="chevron">
+              <Icon name="chevron" size={13} />
+            </span>
+          </span>
+        </summary>
+        {grid}
+      </details>
+    );
   }
 
   return (
@@ -65,15 +98,7 @@ export function SourceList({ sources }: { sources: SourceChunk[] }) {
         Numbers like [1] in the answer refer to these passages from your PDF.
       </p>
 
-      <ol className="source-grid">
-        {sources.map((source, index) => (
-          <SourceCard
-            key={source.id}
-            source={source}
-            number={index + 1}
-          />
-        ))}
-      </ol>
+      {grid}
     </section>
   );
 }

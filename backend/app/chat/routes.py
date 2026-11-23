@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -11,15 +11,30 @@ from app.auth.access_control import (
     increment_question_count,
 )
 from app.auth.dependencies import get_current_user
-from app.chat.schemas import AskQuestionRequest, AskQuestionResponse, SourceChunk
+from app.chat.schemas import (
+    AskQuestionRequest,
+    AskQuestionResponse,
+    ChatMessageResponse,
+    SourceChunk,
+)
+from app.chat.service import (
+    build_search_query,
+    clear_history,
+    get_history_messages,
+    get_recent_turns,
+    save_exchange,
+)
 from app.database.connection import SessionLocal, get_db
 from app.rag.llm import LLMBudgetError, LLMError, start_llm_stream
-from app.rag.service import answer_question_with_rag, prepare_rag_prompt
+from app.rag.service import (
+    answer_question_with_rag,
+    get_user_document,
+    prepare_rag_prompt,
+)
 from app.users.models import User
 
 
 logger = logging.getLogger(__name__)
-
 
 router = APIRouter(
     prefix="/chat",
@@ -59,6 +74,56 @@ def sse_event(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def finish_exchange(
+    db: Session,
+    user: User,
+    document_id: int,
+    question: str,
+    answer: str,
+    sources: list[dict],
+) -> None:
+    """Başarılı bir cevaptan sonra: soru-cevabı geçmişe kaydet, soru hakkını düş."""
+    save_exchange(
+        db=db,
+        user_id=user.id,
+        document_id=document_id,
+        question=question,
+        answer=answer,
+        sources=sources,
+    )
+    increment_question_count(db=db, user=user)
+
+
+@router.get(
+    "/history/{document_id}",
+    response_model=list[ChatMessageResponse],
+)
+def get_history(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    get_user_document(db=db, document_id=document_id, owner_id=current_user.id)
+    return get_history_messages(
+        db=db,
+        user_id=current_user.id,
+        document_id=document_id,
+    )
+
+
+@router.delete(
+    "/history/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_history(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    get_user_document(db=db, document_id=document_id, owner_id=current_user.id)
+    clear_history(db=db, user_id=current_user.id, document_id=document_id)
+
+
 @router.post(
     "/ask",
     response_model=AskQuestionResponse,
@@ -70,8 +135,10 @@ def ask(
 ):
     ensure_can_ask_question(current_user)
 
-    retrieval_limit = get_effective_retrieval_limit(
-        request_data.limit
+    history = get_recent_turns(
+        db=db,
+        user_id=current_user.id,
+        document_id=request_data.document_id,
     )
 
     answer, chunks = answer_question_with_rag(
@@ -79,15 +146,22 @@ def ask(
         document_id=request_data.document_id,
         question=request_data.question,
         owner_id=current_user.id,
-        limit=retrieval_limit,
-    )
-
-    increment_question_count(
-        db=db,
-        user=current_user,
+        limit=get_effective_retrieval_limit(request_data.limit),
+        answer_language=request_data.answer_language,
+        history=history,
+        search_query=build_search_query(request_data.question, history),
     )
 
     sources = build_sources(chunks)
+
+    finish_exchange(
+        db=db,
+        user=current_user,
+        document_id=request_data.document_id,
+        question=request_data.question,
+        answer=answer,
+        sources=[source.model_dump() for source in sources],
+    )
 
     return AskQuestionResponse(
         answer=answer,
@@ -109,12 +183,21 @@ def ask_stream(
     """
     ensure_can_ask_question(current_user)
 
+    history = get_recent_turns(
+        db=db,
+        user_id=current_user.id,
+        document_id=request_data.document_id,
+    )
+
     prompt, mode, chunks = prepare_rag_prompt(
         db=db,
         document_id=request_data.document_id,
         question=request_data.question,
         owner_id=current_user.id,
         limit=get_effective_retrieval_limit(request_data.limit),
+        answer_language=request_data.answer_language,
+        history=history,
+        search_query=build_search_query(request_data.question, history),
     )
 
     try:
@@ -126,36 +209,46 @@ def ask_stream(
 
     sources = [source.model_dump() for source in build_sources(chunks)]
     user_id = current_user.id
+    document_id = request_data.document_id
+    question = request_data.question
 
     def event_stream() -> Iterator[str]:
         yield sse_event({"type": "sources", "sources": sources})
 
-        produced_text = False
+        parts: list[str] = []
         try:
             for text in deltas:
-                produced_text = True
+                parts.append(text)
                 yield sse_event({"type": "delta", "text": text})
         except LLMError as exc:
             yield sse_event({"type": "error", "message": str(exc)})
             return
 
-        if not produced_text:
+        answer = "".join(parts).strip()
+        if not answer:
             yield sse_event({
                 "type": "error",
-                "message": "Model boş bir cevap döndürdü. Lütfen soruyu yeniden deneyin.",
+                "message": "The model returned an empty answer. Please try again.",
             })
             return
 
-        # Soru hakkı yalnızca cevap başarıyla tamamlandığında düşülür.
+        # Geçmişe kayıt ve soru hakkı yalnızca cevap başarıyla tamamlanınca.
         # İstek kapsamındaki oturum akış sırasında kapanmış olabileceği için
         # burada ayrı bir veritabanı oturumu kullanılır.
         try:
             with SessionLocal() as session:
                 user = session.get(User, user_id)
                 if user is not None:
-                    increment_question_count(db=session, user=user)
+                    finish_exchange(
+                        db=session,
+                        user=user,
+                        document_id=document_id,
+                        question=question,
+                        answer=answer,
+                        sources=sources,
+                    )
         except Exception:
-            logger.exception("Soru sayacı güncellenemedi (kullanıcı %s).", user_id)
+            logger.exception("Sohbet kaydı / soru sayacı güncellenemedi (kullanıcı %s).", user_id)
 
         yield sse_event({"type": "done"})
 
@@ -167,4 +260,3 @@ def ask_stream(
             "X-Accel-Buffering": "no",  # proxy'lerin akışı tamponlamasını engeller
         },
     )
-

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.documents.models import Document
 from app.rag.llm import LLMBudgetError, LLMError, generate_with_llm
-from app.rag.prompt_builder import build_prompt
+from app.rag.prompt_builder import HistoryTurn, build_prompt
 from app.rag.retriever import retrieve_context_chunks
 
 
@@ -55,6 +55,9 @@ def prepare_rag_prompt(
     question: str,
     owner_id: int,
     limit: int = 8,
+    answer_language: str = "auto",
+    history: list[HistoryTurn] | None = None,
+    search_query: str | None = None,
 ):
     """Belge sahipliğini doğrular, ilgili parçaları getirir ve prompt'u hazırlar.
 
@@ -71,6 +74,7 @@ def prepare_rag_prompt(
         document_id=document_id,
         question=question,
         limit=limit,
+        search_query=search_query,
     )
 
     if not chunks:
@@ -86,6 +90,8 @@ def prepare_rag_prompt(
         question=question,
         chunks=chunks,
         mode=mode,
+        answer_language=answer_language,
+        history=history or [],
     )
 
     return prompt, mode, chunks
@@ -97,6 +103,9 @@ def answer_question_with_rag(
     question: str,
     owner_id: int,
     limit: int = 8,
+    answer_language: str = "auto",
+    history: list[HistoryTurn] | None = None,
+    search_query: str | None = None,
 ):
     prompt, mode, chunks = prepare_rag_prompt(
         db=db,
@@ -104,6 +113,9 @@ def answer_question_with_rag(
         question=question,
         owner_id=owner_id,
         limit=limit,
+        answer_language=answer_language,
+        history=history,
+        search_query=search_query,
     )
 
     try:

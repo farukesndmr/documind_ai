@@ -10,6 +10,7 @@ const ENDPOINTS = {
   upload: "/documents/upload",
   chatAsk: "/chat/ask",
   chatAskStream: "/chat/ask/stream",
+  chatHistory: "/chat/history",
   adminUsers: "/admin/users",
   adminPendingUsers: "/admin/users/pending",
   googleLogin: "/auth/google-login",
@@ -40,6 +41,20 @@ export type SourceChunk = {
   chunk_index: number;
   page_number?: number | null;
   content: string;
+};
+
+export type AnswerLanguage = "auto" | "en" | "tr" | "de" | "es" | "fr";
+
+export type ChatRole = "user" | "assistant";
+
+export type ChatMessage = {
+  id: number | string;
+  role: ChatRole;
+  content: string;
+  sources: SourceChunk[];
+  created_at?: string | null;
+  /** Yalnızca arayüzde: cevap akarken "streaming", akış yarıda kaldıysa "interrupted". */
+  status?: "streaming" | "interrupted";
 };
 
 export type ChatAnswer = {
@@ -511,6 +526,7 @@ export async function deleteDocument(
 export async function askQuestion(
   documentId: number,
   question: string,
+  answerLanguage: AnswerLanguage = "auto",
 ): Promise<ChatAnswer> {
   const response = await fetch(
     `${API_BASE_URL}${ENDPOINTS.chatAsk}`,
@@ -523,8 +539,8 @@ export async function askQuestion(
       body: JSON.stringify({
         document_id: documentId,
         question,
-        message: question,
         limit: 6,
+        answer_language: answerLanguage,
       }),
     },
   );
@@ -664,6 +680,7 @@ export async function askQuestionStream(
   documentId: number,
   question: string,
   handlers: StreamHandlers,
+  answerLanguage: AnswerLanguage = "auto",
 ): Promise<void> {
   const response = await fetch(
     `${API_BASE_URL}${ENDPOINTS.chatAskStream}`,
@@ -678,6 +695,7 @@ export async function askQuestionStream(
         document_id: documentId,
         question,
         limit: 6,
+        answer_language: answerLanguage,
       }),
     },
   );
@@ -747,6 +765,54 @@ export async function askQuestionStream(
   if (!finished) {
     throw new Error(
       "The answer was interrupted. Please try asking again.",
+    );
+  }
+}
+
+export async function getChatHistory(
+  documentId: number,
+): Promise<ChatMessage[]> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.chatHistory}/${documentId}`,
+    {
+      method: "GET",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      await readErrorMessage(response),
+      response.status,
+    );
+  }
+
+  const data = (await response.json()) as ChatMessage[];
+  return data.map((message) => ({
+    ...message,
+    sources: message.sources ?? [],
+  }));
+}
+
+export async function clearChatHistory(
+  documentId: number,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.chatHistory}/${documentId}`,
+    {
+      method: "DELETE",
+      headers: {
+        ...getAuthHeaders(),
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      await readErrorMessage(response),
+      response.status,
     );
   }
 }

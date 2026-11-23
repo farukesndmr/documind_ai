@@ -1,25 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent,
   FormEvent,
   KeyboardEvent,
 } from "react";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 import "./App.css";
 import "./delete.css";
 
-import { CopyButton } from "./components/CopyButton";
+import { ChatThread } from "./components/ChatThread";
 import { Icon, type IconName } from "./components/Icon";
 import { LoginPage } from "./components/LoginPage";
 import { ServerStatus } from "./components/ServerStatus";
-import { SourceList } from "./components/SourceList";
+import { LanguageSelect } from "./components/LanguageSelect";
+import { loadAnswerLanguage, saveAnswerLanguage } from "./answerLanguage";
 
 import {
   askQuestion,
   askQuestionStream,
+  clearChatHistory,
+  getChatHistory,
   deleteDocument,
   getDocuments,
   isStreamingUnavailable,
@@ -29,7 +30,8 @@ import {
   loginWithGoogle,
   setToken,
   uploadDocument,
-  type ChatAnswer,
+  type AnswerLanguage,
+  type ChatMessage,
   type DocumentItem,
   type UserProfile,
 } from "./api";
@@ -47,28 +49,28 @@ const QUICK_ACTIONS: QuickAction[] = [
     title: "Exam summary",
     description: "Create a structured study guide",
     prompt:
-      "Bu belgenin sınav odaklı, detaylı ve başlıklandırılmış bir özetini çıkar.",
+      "Create a detailed, exam-focused summary of this document with clear headings.",
     icon: "summary",
   },
   {
     title: "Flashcards",
     description: "Turn key ideas into study cards",
     prompt:
-      "Bu belgedeki önemli kavramlardan soru-cevap formatında flashcardlar oluştur.",
+      "Create question-and-answer flashcards from the key concepts in this document.",
     icon: "flashcards",
   },
   {
     title: "Generate quiz",
     description: "Test your document knowledge",
     prompt:
-      "Bu belgeye dayanarak cevapları en sonda bulunan 10 soruluk bir quiz hazırla.",
+      "Create a 10-question quiz based on this document, with the answer key at the end.",
     icon: "quiz",
   },
   {
     title: "Key concepts",
     description: "Extract the essential ideas",
     prompt:
-      "Bu belgedeki en önemli kavramları kısa ve anlaşılır açıklamalarıyla listele.",
+      "List the key concepts in this document with short, clear explanations.",
     icon: "concepts",
   },
 ];
@@ -117,8 +119,13 @@ function App() {
   >(null);
 
   const [question, setQuestion] = useState("");
-  const [chatAnswer, setChatAnswer] =
-    useState<ChatAnswer | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Hangi belgenin geçmişi "messages" içinde yüklü (belge değişince yeniden yüklenir).
+  const [historyDocumentId, setHistoryDocumentId] = useState<number | null>(null);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [answerLanguage, setAnswerLanguage] =
+    useState<AnswerLanguage>(loadAnswerLanguage);
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
 
@@ -130,7 +137,11 @@ function App() {
 
   const isAdmin = currentUser?.role === "admin";
 
-  const hasAnswerText = Boolean(chatAnswer?.answer);
+  const historyLoading =
+    selectedDocumentId !== null && historyDocumentId !== selectedDocumentId;
+  const visibleMessages = historyLoading ? [] : messages;
+  const hasConversation = visibleMessages.length > 0;
+  const currentUserId = currentUser?.id;
 
   const canUseWorkspace = Boolean(
     currentUser &&
@@ -156,7 +167,8 @@ const clearSession = useCallback(() => {
   setCurrentUser(null);
   setDocuments([]);
   setSelectedDocumentId(null);
-  setChatAnswer(null);
+  setMessages([]);
+  setHistoryDocumentId(null);
   setQuestion("");
   setChatError("");
   setDocumentsError("");
@@ -176,6 +188,15 @@ const clearSession = useCallback(() => {
       return true;
     },
     [clearSession],
+  );
+
+  const scrollThreadToEnd = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      window.requestAnimationFrame(() => {
+        threadEndRef.current?.scrollIntoView({ behavior, block: "end" });
+      });
+    },
+    [],
   );
 
 const loadCurrentUser = useCallback(async () => {
@@ -260,6 +281,58 @@ const loadCurrentUser = useCallback(async () => {
     loadCurrentUser,
     loadDocuments,
   ]);
+
+  // Seçili belgenin sohbet geçmişini yükle.
+  useEffect(() => {
+    if (selectedDocumentId === null || currentUserId === undefined) {
+      return;
+    }
+
+    let cancelled = false;
+    const documentId = selectedDocumentId;
+
+    getChatHistory(documentId)
+      .then((history) => {
+        if (cancelled) {
+          return;
+        }
+        setMessages(history);
+        setHistoryDocumentId(documentId);
+        scrollThreadToEnd();
+      })
+      .catch((error: unknown) => {
+        if (cancelled || handleSessionError(error)) {
+          return;
+        }
+        setMessages([]);
+        setHistoryDocumentId(documentId);
+        // Eski backend'de geçmiş endpoint'i yoksa sessizce boş sohbetle devam et.
+        if (!isStreamingUnavailable(error)) {
+          setChatError("Conversation history could not be loaded.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDocumentId, currentUserId, handleSessionError, scrollThreadToEnd]);
+
+  // Cevap akarken, kullanıcı en alttaysa sohbeti aşağı kaydır.
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+
+    if (lastMessage?.status !== "streaming") {
+      return;
+    }
+
+    const distanceFromBottom =
+      document.documentElement.scrollHeight -
+      (window.scrollY + window.innerHeight);
+
+    if (distanceFromBottom < 220) {
+      threadEndRef.current?.scrollIntoView({ block: "end" });
+    }
+  }, [messages]);
 
   async function handleGoogleLoginSuccess(credential?: string) {
     if (!credential) {
@@ -353,7 +426,7 @@ const loadCurrentUser = useCallback(async () => {
         setSelectedDocumentId(
           remainingDocuments[0]?.id ?? null,
         );
-        setChatAnswer(null);
+        setMessages([]);
         setQuestion("");
         setChatError("");
       }
@@ -385,41 +458,96 @@ const loadCurrentUser = useCallback(async () => {
       return;
     }
 
-    try {
-      setQuestion(cleanPrompt);
-      setChatLoading(true);
-      setChatError("");
-      setChatAnswer(null);
+    const documentId = selectedDocumentId;
+    const stamp = Date.now();
+    const userMessageId = `local-user-${stamp}`;
+    const assistantMessageId = `local-assistant-${stamp}`;
 
+    const updateAssistant = (
+      update: (message: ChatMessage) => ChatMessage,
+    ) => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantMessageId ? update(message) : message,
+        ),
+      );
+    };
+
+    setChatLoading(true);
+    setChatError("");
+    setQuestion("");
+    setMessages((current) => [
+      ...current,
+      { id: userMessageId, role: "user", content: cleanPrompt, sources: [] },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        sources: [],
+        status: "streaming",
+      },
+    ]);
+    scrollThreadToEnd("smooth");
+
+    try {
       try {
-        await askQuestionStream(selectedDocumentId, cleanPrompt, {
-          onSources: (sources) => {
-            setChatAnswer({ answer: "", sources });
+        await askQuestionStream(
+          documentId,
+          cleanPrompt,
+          {
+            onSources: (sources) => {
+              updateAssistant((message) => ({ ...message, sources }));
+            },
+            onDelta: (text) => {
+              updateAssistant((message) => ({
+                ...message,
+                content: message.content + text,
+              }));
+            },
           },
-          onDelta: (text) => {
-            setChatAnswer((current) =>
-              current
-                ? { ...current, answer: current.answer + text }
-                : { answer: text, sources: [] },
-            );
-          },
-        });
+          answerLanguage,
+        );
       } catch (streamError) {
         if (!isStreamingUnavailable(streamError)) {
           throw streamError;
         }
         // Backend henüz streaming desteklemiyorsa normal isteğe dön.
-        const answer = await askQuestion(selectedDocumentId, cleanPrompt);
-        setChatAnswer(answer);
+        const answer = await askQuestion(documentId, cleanPrompt, answerLanguage);
+        updateAssistant((message) => ({
+          ...message,
+          content: answer.answer,
+          sources: answer.sources,
+        }));
       }
 
+      updateAssistant((message) => ({ ...message, status: undefined }));
       await loadCurrentUser();
     } catch (error) {
       if (handleSessionError(error)) {
         return;
       }
-      // Akış metin gelmeden koptuysa boş cevap kartı kalmasın.
-      setChatAnswer((current) => (current?.answer ? current : null));
+
+      setMessages((current) => {
+        const assistant = current.find(
+          (message) => message.id === assistantMessageId,
+        );
+
+        if (assistant && assistant.content) {
+          // Metnin bir kısmı geldiyse göster ama yarım kaldığını belirt.
+          return current.map((message) =>
+            message.id === assistantMessageId
+              ? { ...message, status: "interrupted" }
+              : message,
+          );
+        }
+
+        // Hiç cevap gelmediyse soruyu geri al ki kullanıcı tekrar deneyebilsin.
+        return current.filter(
+          (message) =>
+            message.id !== assistantMessageId && message.id !== userMessageId,
+        );
+      });
+      setQuestion((current) => current || cleanPrompt);
       setChatError(
         error instanceof Error
           ? error.message
@@ -428,6 +556,43 @@ const loadCurrentUser = useCallback(async () => {
     } finally {
       setChatLoading(false);
     }
+  }
+
+  async function handleClearHistory() {
+    if (selectedDocumentId === null || clearingHistory) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Clear this conversation? Your document will not be deleted.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setClearingHistory(true);
+      await clearChatHistory(selectedDocumentId);
+      setMessages([]);
+      setChatError("");
+    } catch (error) {
+      if (handleSessionError(error)) {
+        return;
+      }
+      setChatError(
+        error instanceof Error
+          ? error.message
+          : "Conversation could not be cleared.",
+      );
+    } finally {
+      setClearingHistory(false);
+    }
+  }
+
+  function handleLanguageChange(value: AnswerLanguage) {
+    setAnswerLanguage(value);
+    saveAnswerLanguage(value);
   }
 
   async function handleAskQuestion(
@@ -646,9 +811,17 @@ const loadCurrentUser = useCallback(async () => {
                         ? "document-item selected"
                         : "document-item"
                     }
+                    disabled={chatLoading && !isSelected}
+                    title={
+                      chatLoading && !isSelected
+                        ? "Wait for the current answer to finish"
+                        : undefined
+                    }
                     onClick={() => {
+                      if (isSelected) {
+                        return;
+                      }
                       setSelectedDocumentId(document.id);
-                      setChatAnswer(null);
                       setChatError("");
                       setQuestion("");
                     }}
@@ -765,178 +938,170 @@ const loadCurrentUser = useCallback(async () => {
             )}
           </section>
 
-          <section className="quick-actions">
-            <div className="content-title">
-              <span className="section-caption">
-                Suggested actions
-              </span>
-
-              <h2>Start with a document task</h2>
-            </div>
-
-            <div className="quick-action-grid">
-              {QUICK_ACTIONS.map((action) => (
-                <button
-                  type="button"
-                  key={action.title}
-                  className="quick-action"
-                  disabled={
-                    selectedDocumentId === null ||
-                    chatLoading ||
-                    !canUseWorkspace
-                  }
-                  onClick={() =>
-                    void runQuestion(action.prompt)
-                  }
-                >
-                  <div className="quick-action-icon">
-                    <Icon name={action.icon} size={18} />
-                  </div>
-
-                  <div>
-                    <strong>{action.title}</strong>
-                    <span>{action.description}</span>
-                  </div>
-
-                  <Icon name="arrow" size={16} />
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <form
-            className="question-box"
-            onSubmit={handleAskQuestion}
-          >
-            <div className="question-icon">
-              <Icon name="sparkles" size={19} />
-            </div>
-
-            <div className="question-content">
-              <textarea
-                rows={3}
-                value={question}
-                placeholder="Ask a question about the selected PDF..."
-                onKeyDown={handleQuestionKeyDown}
-                onChange={(event) =>
-                  setQuestion(event.target.value)
-                }
-              />
-
-              <div className="question-footer">
-                <span>
-                  Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to
-                  send
-                </span>
-
-                <button
-                  type="submit"
-                  className="ask-button"
-                  disabled={
-                    chatLoading ||
-                    selectedDocumentId === null ||
-                    !canUseWorkspace ||
-                    !question.trim()
-                  }
-                >
-                  <span>
-                    {chatLoading
-                      ? "Thinking..."
-                      : "Ask"}
-                  </span>
-
-                  <Icon name="send" size={16} />
-                </button>
-              </div>
-            </div>
-          </form>
-
-          {chatError && (
-            <p className="workspace-error">{chatError}</p>
+          {historyLoading && (
+            <p className="history-loading" role="status">
+              Loading conversation…
+            </p>
           )}
 
-          <section className="answer-container">
-            {!chatAnswer && !chatLoading && (
-              <div className="answer-placeholder">
-                <div className="placeholder-visual">
-                  <div className="placeholder-ring outer" />
-                  <div className="placeholder-ring inner" />
+          {!historyLoading && !hasConversation && (
+            <>
+            <section className="quick-actions">
+              <div className="content-title">
+                <span className="section-caption">
+                  Suggested actions
+                </span>
 
-                  <div className="placeholder-core">
-                    <Icon name="sparkles" size={24} />
-                  </div>
-                </div>
-
-                <h2>Your grounded answer will appear here</h2>
-
-                <p>
-                  Ask a question or select one of the suggested
-                  actions.
-                </p>
+                <h2>Start with a document task</h2>
               </div>
-            )}
 
-            {chatLoading && !hasAnswerText && (
-              <div className="answer-loading">
-                <div className="loading-heading">
-                  <div className="loading-icon">
-                    <Icon name="sparkles" size={18} />
-                  </div>
-
-                  <div>
-                    <strong>Searching relevant passages</strong>
-                    <span>
-                      Preparing a source-grounded response. Summaries
-                      and quizzes can take 10–30 seconds.
-                    </span>
-                  </div>
-                </div>
-
-                <div className="loading-lines">
-                  <span className="long" />
-                  <span className="medium" />
-                  <span className="long" />
-                  <span className="short" />
-                </div>
-              </div>
-            )}
-
-            {chatAnswer && hasAnswerText && (
-              <div className="answer-content">
-                <header className="answer-header">
-                  <div className="answer-header-icon">
-                    <Icon name="sparkles" size={16} />
-                  </div>
-
-                  <div>
-                    <span>AI response</span>
-                    <strong>Grounded in your PDF</strong>
-                  </div>
-
-                  {!chatLoading && <CopyButton text={chatAnswer.answer} />}
-                </header>
-
-                <article
-                  className={
-                    chatLoading
-                      ? "markdown-answer streaming"
-                      : "markdown-answer"
-                  }
-                  aria-busy={chatLoading}
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
+              <div className="quick-action-grid">
+                {QUICK_ACTIONS.map((action) => (
+                  <button
+                    type="button"
+                    key={action.title}
+                    className="quick-action"
+                    disabled={
+                      selectedDocumentId === null ||
+                      chatLoading ||
+                      historyLoading ||
+                      !canUseWorkspace
+                    }
+                    onClick={() =>
+                      void runQuestion(action.prompt)
+                    }
                   >
-                    {chatAnswer.answer}
-                  </ReactMarkdown>
-                </article>
+                    <div className="quick-action-icon">
+                      <Icon name={action.icon} size={18} />
+                    </div>
 
-                {!chatLoading && (
-                  <SourceList sources={chatAnswer.sources} />
-                )}
+                    <div>
+                      <strong>{action.title}</strong>
+                      <span>{action.description}</span>
+                    </div>
+
+                    <Icon name="arrow" size={16} />
+                  </button>
+                ))}
+              </div>
+            </section>
+            </>
+          )}
+
+          {hasConversation && (
+            <ChatThread
+              messages={visibleMessages}
+              onClear={() => void handleClearHistory()}
+              clearing={clearingHistory}
+              disabled={chatLoading}
+            />
+          )}
+
+          <div className={hasConversation ? "composer sticky" : "composer"}>
+            {hasConversation && (
+              <div className="quick-chips" aria-label="Suggested actions">
+                {QUICK_ACTIONS.map((action) => (
+                  <button
+                    type="button"
+                    key={action.title}
+                    className="quick-chip"
+                    disabled={chatLoading || !canUseWorkspace}
+                    onClick={() => void runQuestion(action.prompt)}
+                  >
+                    <Icon name={action.icon} size={14} />
+                    {action.title}
+                  </button>
+                ))}
               </div>
             )}
-          </section>
+
+            <form
+              className="question-box"
+              onSubmit={handleAskQuestion}
+            >
+              <div className="question-icon">
+                <Icon name="sparkles" size={19} />
+              </div>
+
+              <div className="question-content">
+                <textarea
+                  rows={3}
+                  value={question}
+                  placeholder={
+                    hasConversation
+                      ? "Ask a follow-up question…"
+                      : "Ask a question about the selected PDF…"
+                  }
+                  onKeyDown={handleQuestionKeyDown}
+                  onChange={(event) =>
+                    setQuestion(event.target.value)
+                  }
+                />
+
+                <div className="question-footer">
+                  <LanguageSelect
+                    value={answerLanguage}
+                    onChange={handleLanguageChange}
+                    disabled={chatLoading}
+                  />
+
+                  <span className="send-hint">
+                    <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send
+                  </span>
+
+                  <button
+                    type="submit"
+                    className="ask-button"
+                    disabled={
+                      chatLoading ||
+                      historyLoading ||
+                      selectedDocumentId === null ||
+                      !canUseWorkspace ||
+                      !question.trim()
+                    }
+                  >
+                    <span>
+                      {chatLoading
+                        ? "Thinking..."
+                        : "Ask"}
+                    </span>
+
+                    <Icon name="send" size={16} />
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            {chatError && (
+              <p className="workspace-error" role="alert">{chatError}</p>
+            )}
+          </div>
+
+          <div ref={threadEndRef} className="thread-end" aria-hidden="true" />
+
+          {!historyLoading && !hasConversation && (
+            <section className="answer-container">
+              {!chatLoading && (
+                <div className="answer-placeholder">
+                  <div className="placeholder-visual">
+                    <div className="placeholder-ring outer" />
+                    <div className="placeholder-ring inner" />
+
+                    <div className="placeholder-core">
+                      <Icon name="sparkles" size={24} />
+                    </div>
+                  </div>
+
+                  <h2>Your grounded answer will appear here</h2>
+
+                  <p>
+                    Ask a question or select one of the suggested
+                    actions.
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
         </div>
       </section>
     </main>
