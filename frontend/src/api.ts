@@ -9,6 +9,7 @@ const ENDPOINTS = {
   documents: "/documents",
   upload: "/documents/upload",
   chatAsk: "/chat/ask",
+  chatAskStream: "/chat/ask/stream",
   adminUsers: "/admin/users",
   adminPendingUsers: "/admin/users/pending",
   googleLogin: "/auth/google-login",
@@ -634,3 +635,119 @@ export async function rejectUser(
   const data = await response.json();
   return normalizeUserProfile(data);
 }
+
+export type StreamHandlers = {
+  onSources: (sources: SourceChunk[]) => void;
+  onDelta: (text: string) => void;
+};
+
+type StreamEvent =
+  | { type: "sources"; sources: SourceChunk[] }
+  | { type: "delta"; text: string }
+  | { type: "error"; message: string }
+  | { type: "done" };
+
+/** Backend'de streaming endpoint'i yoksa (eski sürüm) normal isteğe dönmek için. */
+export function isStreamingUnavailable(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 405 ||
+      (error.status === 404 && error.message === "Not Found"))
+  );
+}
+
+/**
+ * Soruyu sorar ve cevabı Server-Sent Events ile parça parça alır.
+ * Önce kaynaklar, sonra metin parçaları gelir; akış "done" ile biter.
+ */
+export async function askQuestionStream(
+  documentId: number,
+  question: string,
+  handlers: StreamHandlers,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.chatAskStream}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({
+        document_id: documentId,
+        question,
+        limit: 6,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(
+      await readErrorMessage(response),
+      response.status,
+    );
+  }
+
+  if (!response.body) {
+    throw new Error("Your browser does not support streaming responses.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+
+  const handleEvent = (rawEvent: string) => {
+    const data = rawEvent
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+
+    if (!data) {
+      return;
+    }
+
+    const event = JSON.parse(data) as StreamEvent;
+
+    switch (event.type) {
+      case "sources":
+        handlers.onSources(event.sources);
+        break;
+      case "delta":
+        handlers.onDelta(event.text);
+        break;
+      case "error":
+        throw new Error(event.message);
+      case "done":
+        finished = true;
+        break;
+    }
+  };
+
+  while (!finished) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const rawEvent = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      handleEvent(rawEvent);
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  if (!finished) {
+    throw new Error(
+      "The answer was interrupted. Please try asking again.",
+    );
+  }
+}
+
