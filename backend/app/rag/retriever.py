@@ -37,6 +37,25 @@ SUMMARY_KEYWORDS = [
 ]
 
 
+# Belgenin geneline yayılan ama "ders notu" formatı istemeyen görevler.
+# Bunlarda parçalar belgeye eşit dağılarak seçilir, cevap formatı soruya göre belirlenir.
+BROAD_KEYWORDS = [
+    "flashcard",
+    "quiz",
+    "key concepts",
+    "important concepts",
+    "main concepts",
+    "overview",
+    "whole document",
+    "entire document",
+    "önemli kavram",
+    "temel kavram",
+    "tüm belge",
+    "belgenin tamamı",
+    "genel bakış",
+]
+
+
 STOP_WORDS = {
     "bana",
     "şunu",
@@ -65,6 +84,11 @@ STOP_WORDS = {
 def is_summary_request(question: str) -> bool:
     question_lower = question.lower()
     return any(keyword in question_lower for keyword in SUMMARY_KEYWORDS)
+
+
+def is_broad_request(question: str) -> bool:
+    question_lower = question.lower()
+    return any(keyword in question_lower for keyword in BROAD_KEYWORDS)
 
 
 def tokenize(text: str) -> list[str]:
@@ -258,24 +282,29 @@ def retrieve_context_chunks(
     document_id: int,
     question: str,
     limit: int = 8,
+    search_query: str | None = None,
 ) -> tuple[list[DocumentChunk], str]:
+    """Soruya uygun parçaları ve modu ("summary", "broad", "qa") döndürür.
+
+    search_query verilirse arama onunla yapılır (ör. takip sorusu + önceki soru);
+    mod ise her zaman kullanıcının asıl sorusundan belirlenir.
+    """
     chunks = get_document_chunks(
         db=db,
         document_id=document_id,
     )
 
     if is_summary_request(question):
-        selected_chunks = select_summary_chunks(
-            chunks=chunks,
-            limit=max(limit, 12),
-        )
-        return selected_chunks, "summary"
+        return select_summary_chunks(chunks=chunks, limit=max(limit, 12)), "summary"
+
+    if is_broad_request(question):
+        return select_summary_chunks(chunks=chunks, limit=max(limit, 12)), "broad"
 
     selected_chunks = select_question_chunks(
         db=db,
         document_id=document_id,
         chunks=chunks,
-        question=question,
+        question=search_query or question,
         limit=min(limit, 8),
     )
 

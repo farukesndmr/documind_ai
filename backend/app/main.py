@@ -11,6 +11,7 @@ from app.admin.routes import router as admin_router
 from app.users import models as user_models  # noqa: F401 (tabloları kaydeder)
 from app.documents import models as document_models  # noqa: F401
 from app.usage import models as usage_models  # noqa: F401
+from app.chat import models as chat_models  # noqa: F401
 
 from app.auth.routes import router as auth_router
 from app.documents.routes import router as documents_router
