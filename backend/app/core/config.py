@@ -39,13 +39,6 @@ class Settings(BaseSettings):
     def JWT_ACCESS_TOKEN_EXPIRE_MINUTES(self) -> int:
         return self.ACCESS_TOKEN_EXPIRE_MINUTES
 
-    # LLM provider compatibility
-    LOCAL_LLM_PROVIDER: str = "openai"
-
-    # Ollama compatibility
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "llama3.2:3b"
-
     # OpenAI core
     OPENAI_API_KEY: SecretStr | None = None
 
@@ -55,7 +48,6 @@ class Settings(BaseSettings):
 
     # OpenAI embeddings
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     # OpenAI usage limit
     OPENAI_HARD_LIMIT_USD: float = 1.70
@@ -65,7 +57,6 @@ class Settings(BaseSettings):
     OPENAI_OUTPUT_PRICE_PER_1M: float = 0.60
 
     # OpenAI generation settings
-    OPENAI_MAX_OUTPUT_TOKENS: int = 2600
     OPENAI_QA_MAX_OUTPUT_TOKENS: int = 2600
     OPENAI_SUMMARY_MAX_OUTPUT_TOKENS: int = 2600
 

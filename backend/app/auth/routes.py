@@ -32,11 +32,6 @@ router = APIRouter(
 )
 
 
-@router.get("/test")
-def auth_test():
-    return {"message": "Auth router is working"}
-
-
 @router.post(
     "/register",
     response_model=UserResponse,

@@ -7,7 +7,6 @@ const ENDPOINTS = {
   me: "/auth/me",
   verifyEmail: "/auth/verify-email",
   documents: "/documents",
-  documentsWithSlash: "/documents/",
   upload: "/documents/upload",
   chatAsk: "/chat/ask",
   adminUsers: "/admin/users",
@@ -390,17 +389,14 @@ export async function verifyEmail(
 export async function getDocuments(): Promise<
   DocumentItem[]
 > {
-  const response = await fetchFirstAvailable(
-    [
-      ENDPOINTS.documents,
-      ENDPOINTS.documentsWithSlash,
-    ],
-    () => ({
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.documents}`,
+    {
       method: "GET",
       headers: {
         ...getAuthHeaders(),
       },
-    }),
+    },
   );
 
   if (!response.ok) {
@@ -419,19 +415,15 @@ export async function uploadDocument(
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetchFirstAvailable(
-    [
-      ENDPOINTS.upload,
-      ENDPOINTS.documentsWithSlash,
-      ENDPOINTS.documents,
-    ],
-    () => ({
+  const response = await fetch(
+    `${API_BASE_URL}${ENDPOINTS.upload}`,
+    {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
       },
       body: formData,
-    }),
+    },
   );
 
   if (!response.ok) {
