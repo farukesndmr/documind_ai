@@ -49,3 +49,14 @@ def test_sayfa_numarasi_korunur():
 
 def test_pdf_metni_temizlenir():
     assert _clean_page_text("geliş-\ntirme   süreci\n\n\n\nson") == "geliştirme süreci\n\nson"
+
+
+def test_belge_adi_temizlenir():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.documents.schemas import DocumentRenameRequest
+
+    assert DocumentRenameRequest(title="  Ders   9 notları ").title == "Ders 9 notları"
+    with _pytest.raises(ValidationError):
+        DocumentRenameRequest(title="   ")

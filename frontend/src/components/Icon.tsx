@@ -16,7 +16,8 @@ export type IconName =
   | "trash"
   | "copy"
   | "chevron"
-  | "server";
+  | "server"
+  | "edit";
 
 export function Icon({
   name,
@@ -196,6 +197,14 @@ export function Icon({
           <rect x="3" y="13" width="18" height="7" rx="2" />
           <path d="M7 7.5h.01" />
           <path d="M7 16.5h.01" />
+        </svg>
+      );
+
+    case "edit":
+      return (
+        <svg {...iconProps}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
         </svg>
       );
 
